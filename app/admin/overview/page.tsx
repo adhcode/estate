@@ -721,17 +721,6 @@ export function AdminOverviewContent({ user }: AdminOverviewProps) {
     )
 }
 
-export default function Page({
-    params,
-    searchParams,
-}: {
-    params: { slug: string }
-    searchParams: { [key: string]: string | string[] | undefined }
-}) {
-    const user = {
-        name: typeof searchParams.name === 'string' ? searchParams.name : '',
-        avatar: typeof searchParams.avatar === 'string' ? searchParams.avatar : undefined
-    };
-
-    return <AdminOverviewContent user={user} />;
+export default function AdminOverviewPage() {
+    return <AdminOverviewContent />;
 }
