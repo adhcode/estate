@@ -109,7 +109,7 @@ const convertTo24Hour = (time12h: string) => {
     return `${hours}:${minutes}`;
 };
 
-export function AdminOverviewContent({ user }: AdminOverviewProps) {
+function AdminOverviewContent({ user }: AdminOverviewProps) {
     const [isLoading, setIsLoading] = useState(true)
     const [adminData, setAdminData] = useState<any>(null)
     const [stats, setStats] = useState({
