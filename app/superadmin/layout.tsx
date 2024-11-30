@@ -1,5 +1,3 @@
-'use client'
-
 import { ReactNode } from 'react'
 import Link from 'next/link'
 import { Button } from "@/components/ui/button"
@@ -22,7 +20,7 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
   }
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen">
       <Sidebar>
         <SidebarHeader>
           <Link href="/superadmin/dashboard" className="flex items-center space-x-2 px-4 py-3">
@@ -82,20 +80,9 @@ export default async function SuperAdminLayout({ children }: { children: ReactNo
           </SidebarMenu>
         </SidebarContent>
       </Sidebar>
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <header className="bg-white shadow-sm z-10">
-          <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-            <h1 className="text-2xl font-semibold text-gray-900">Super Admin Dashboard</h1>
-          </div>
-        </header>
-        <main className="flex-1 overflow-y-auto bg-gray-100 p-4">
-          <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
-            <ScrollArea className="h-full">
-              {children}
-            </ScrollArea>
-          </div>
-        </main>
-      </div>
+      <main className="flex-1 overflow-y-auto">
+        {children}
+      </main>
     </div>
   )
 }
