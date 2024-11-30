@@ -5,11 +5,12 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 type NavbarProps = {
-    name: string
+    name: string;
 }
 
 export function Navbar({ name }: NavbarProps) {
     const router = useRouter()
+    const userName = name;
 
     return (
         <header className="w-full py-4 px-6 flex justify-between items-center bg-white shadow-md sticky top-0 z-10 font-montserrat">

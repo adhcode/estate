@@ -16,29 +16,15 @@ export default async function ResidentLayout({
 }: {
   children: ReactNode
 }) {
-  const cookieStore = cookies();
-  const supabase = createServerComponentClient({ cookies: () => cookieStore });
+  const supabase = createServerComponentClient({ cookies })
+  const { data: { user } } = await supabase.auth.getUser()
 
-  const {
-    data: { session }
-  } = await supabase.auth.getSession()
-
-  if (!session) {
-    redirect('/auth/login')
-  }
-
-  const { data: userData, error: userError } = await supabase
-    .from('users')
-    .select('role')
-    .eq('id', session.user.id)
-    .single()
-
-  if (userError || userData?.role !== 'resident') {
-    redirect('/')
+  if (!user) {
+    redirect('/login')
   }
 
   return (
-    <ResidentUI user={session.user} className={quicksand.className}>
+    <ResidentUI user={user} className={quicksand.className}>
       {children}
       <Toaster />
     </ResidentUI>
