@@ -4,6 +4,7 @@ import React, { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { LogOut } from "lucide-react"
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import {
     Dialog,
     DialogContent,
@@ -12,17 +13,18 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { useClerk } from "@clerk/nextjs"
 
 export function LogoutButton() {
     const [showConfirmation, setShowConfirmation] = useState(false)
-    const { signOut } = useClerk()
     const router = useRouter()
+    const supabase = createClientComponentClient()
 
     const handleLogout = async () => {
-        await signOut()
-        router.push("/sign-in")
-        setShowConfirmation(false)
+        const { error } = await supabase.auth.signOut()
+        if (!error) {
+            router.push("/auth/login")
+            setShowConfirmation(false)
+        }
     }
 
     return (
@@ -67,4 +69,4 @@ export function LogoutButton() {
             </Dialog>
         </>
     )
-} 
+}
