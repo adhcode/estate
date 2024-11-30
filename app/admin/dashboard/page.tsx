@@ -3,13 +3,10 @@
 import AdminOverviewContent from "../overview/page"
 import { AdminUI } from "../components/AdminUI"
 
-export default function AdminDashboard() {
+export default function DashboardPage() {
   return (
     <AdminUI>
-      <AdminOverviewContent
-        params={{ slug: '' }}
-        searchParams={{}}
-      />
+      <AdminOverviewContent />
     </AdminUI>
   )
 }
