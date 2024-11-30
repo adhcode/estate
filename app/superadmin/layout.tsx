@@ -2,13 +2,25 @@
 
 import { ReactNode } from 'react'
 import Link from 'next/link'
-import { UserButton } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "@/components/ui/sidebar"
 import { Home, Users, Settings, BarChart, FileText, Bell } from 'lucide-react'
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 
-export default function SuperAdminLayout({ children }: { children: ReactNode }) {
+export default async function SuperAdminLayout({ children }: { children: ReactNode }) {
+  const supabase = createServerComponentClient({ cookies });
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    redirect('/auth/signin');
+  }
+
   return (
     <div className="flex h-screen bg-gray-100">
       <Sidebar>
@@ -74,7 +86,6 @@ export default function SuperAdminLayout({ children }: { children: ReactNode }) 
         <header className="bg-white shadow-sm z-10">
           <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
             <h1 className="text-2xl font-semibold text-gray-900">Super Admin Dashboard</h1>
-            <UserButton />
           </div>
         </header>
         <main className="flex-1 overflow-y-auto bg-gray-100 p-4">
