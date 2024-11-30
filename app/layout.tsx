@@ -1,4 +1,4 @@
-import '@/styles/globals.css'
+import './globals.css'
 import { Quicksand } from 'next/font/google'
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
@@ -19,7 +19,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`bg-[#FBFBFB] ${quicksand.variable}`}>
+      <body className={`bg-[#FBFBFB] ${quicksand.variable} min-h-screen flex flex-col text-red-500`}>
         <ClientProvider session={session}>
           {children}
         </ClientProvider>

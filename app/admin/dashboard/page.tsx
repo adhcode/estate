@@ -6,7 +6,10 @@ import { AdminUI } from "../components/AdminUI"
 export default function AdminDashboard() {
   return (
     <AdminUI>
-      <AdminOverviewContent />
+      <AdminOverviewContent
+        params={{ slug: '' }}
+        searchParams={{}}
+      />
     </AdminUI>
   )
 }

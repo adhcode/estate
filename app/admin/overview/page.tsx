@@ -109,23 +109,7 @@ const convertTo24Hour = (time12h: string) => {
     return `${hours}:${minutes}`;
 };
 
-export default function Page({
-    params,
-    searchParams,
-}: {
-    params: { slug: string }
-    searchParams: { [key: string]: string | string[] | undefined }
-}) {
-    // Create a user object from searchParams if needed
-    const user = {
-        name: typeof searchParams.name === 'string' ? searchParams.name : '',
-        avatar: typeof searchParams.avatar === 'string' ? searchParams.avatar : undefined
-    };
-
-    return <AdminOverviewContent user={user} />;
-}
-
-function AdminOverviewContent({ user }: AdminOverviewProps) {
+export function AdminOverviewContent({ user }: AdminOverviewProps) {
     const [isLoading, setIsLoading] = useState(true)
     const [adminData, setAdminData] = useState<any>(null)
     const [stats, setStats] = useState({
@@ -735,4 +719,19 @@ function AdminOverviewContent({ user }: AdminOverviewProps) {
             <Footer />
         </div>
     )
+}
+
+export default function Page({
+    params,
+    searchParams,
+}: {
+    params: { slug: string }
+    searchParams: { [key: string]: string | string[] | undefined }
+}) {
+    const user = {
+        name: typeof searchParams.name === 'string' ? searchParams.name : '',
+        avatar: typeof searchParams.avatar === 'string' ? searchParams.avatar : undefined
+    };
+
+    return <AdminOverviewContent user={user} />;
 }
