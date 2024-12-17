@@ -28,6 +28,6 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error('Callback error:', error)
     // Redirect to login page if something goes wrong
-    return NextResponse.redirect('https://196d-129-18-233-157.ngrok-free.app/auth/login?error=callback_error')
+    return NextResponse.redirect('https://lkjgardensigando.com/auth/login?error=callback_error')
   }
 } 
