@@ -59,15 +59,14 @@ export default function RegisterVisitor() {
       const { data: { user }, error: userError } = await supabase.auth.getUser()
       if (userError || !user) throw new Error('Authentication error')
 
-      const { data: residentData, error: residentError } = await supabase
-        .from('residents')
+      const { data: userData, error: userDataError } = await supabase
+        .from('users')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('id', user.id)
         .single()
 
-      if (residentError) throw new Error('Failed to get resident data')
+      if (userDataError) throw new Error('Failed to get user data')
 
-      // Auto-generate current date and time
       const now = new Date()
       const currentDate = now.toISOString().split('T')[0]
       const currentTime = now.toLocaleTimeString('en-US', {
@@ -78,12 +77,14 @@ export default function RegisterVisitor() {
 
       const guestData = {
         guest_id: formData.guestId,
-        primary_resident_id: residentData.id,
+        user_id: user.id,
         full_name: formData.fullName,
         visit_date: currentDate,
         visit_time: currentTime,
         purpose_of_visit: formData.purpose,
-        status: 'pending'
+        status: 'pending',
+        block_number: userData.block_number,
+        flat_number: userData.flat_number
       }
 
       const { error: visitorError } = await supabase

@@ -4,35 +4,31 @@ export type Database = {
         users: {
           Row: {
             id: string
-            full_name: string
             email: string
+            full_name: string
             phone_number: string | null
             block_number: string
             flat_number: string
-            profile_image_url: string | null
-            role: string
-            created_at: string
+            role: 'resident'
           }
           Insert: {
             id?: string
-            full_name: string
             email: string
+            full_name: string
             phone_number?: string | null
             block_number: string
             flat_number: string
-            profile_image_url?: string | null
-            role?: string
+            role?: 'resident'
             created_at?: string
           }
           Update: {
             id?: string
-            full_name?: string
             email?: string
+            full_name?: string
             phone_number?: string | null
             block_number?: string
             flat_number?: string
-            profile_image_url?: string | null
-            role?: string
+            role?: 'resident'
             created_at?: string
           }
         }

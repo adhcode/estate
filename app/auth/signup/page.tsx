@@ -41,11 +41,13 @@ type FieldErrors = {
   block?: string;
   flatNumber?: string;
   password?: string;
+  confirmPassword?: string;
 }
 
 interface FormData {
   email: string;
   password: string;
+  confirmPassword: string;
   fullName: string;
   phoneNumber: string;
   block: string;
@@ -62,6 +64,7 @@ export default function SignUpPage() {
   const [formData, setFormData] = useState<FormData>({
     email: '',
     password: '',
+    confirmPassword: '',
     fullName: '',
     phoneNumber: '',
     block: '',
@@ -72,6 +75,8 @@ export default function SignUpPage() {
   const [isCheckingEmail, setIsCheckingEmail] = useState(false)
   const [isEmailTaken, setIsEmailTaken] = useState(false)
   const [showSuccessDialog, setShowSuccessDialog] = useState(false)
+  const [isButtonDisabled, setIsButtonDisabled] = useState(false);
+  const COOLDOWN_PERIOD = 60000; // 1 minute in milliseconds
 
   const validateField = (name: string, value: string) => {
     switch (name) {
@@ -86,6 +91,10 @@ export default function SignUpPage() {
       case 'password':
         if (!value) return 'Password is required'
         return validatePassword(value)
+      case 'confirmPassword':
+        if (!value) return 'Please confirm your password'
+        if (value !== formData.password) return 'Passwords do not match'
+        break
       case 'fullName':
         if (!value) return 'Full name is required'
         break
@@ -106,30 +115,49 @@ export default function SignUpPage() {
     return null
   }
 
-  const checkFlatAvailability = async (block: string, flatNumber: string): Promise<boolean> => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id')
-      .eq('block_number', block)
-      .eq('flat_number', flatNumber)
-      .single()
+  const checkFlatAvailability = async (block: string, flatNumber: string) => {
+    try {
+      const { data: existingFlat, error } = await supabase
+        .from('users')
+        .select('id, verified')
+        .eq('block_number', block)
+        .eq('flat_number', flatNumber)
+        .single();
 
-    if (error && error.code !== 'PGRST116') {
-      throw error
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      // If flat exists but user isn't verified, allow reuse
+      if (existingFlat && !existingFlat.verified) {
+        return true;
+      }
+
+      return !existingFlat;
+    } catch (error) {
+      console.error('Flat check error:', error);
+      return false;
     }
-
-    return !data
-  }
+  };
 
   const checkEmailAvailability = async (email: string): Promise<boolean> => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('email')
-      .eq('email', email)
-      .single()
+    try {
+      const { count, error } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('email', email);
 
-    return !data
-  }
+      if (error) {
+        console.error('Email check error:', error);
+        return false;
+      }
+
+      return count === 0;
+    } catch (error) {
+      console.error('Email check error:', error);
+      return false;
+    }
+  };
 
   useEffect(() => {
     if (formData.block && formData.flatNumber) {
@@ -141,39 +169,34 @@ export default function SignUpPage() {
 
   const debouncedCheckEmail = useCallback(
     debounce(async (email: string) => {
-      if (!email || !/\S+@\S+\.\S+/.test(email)) return
+      if (!email || !/\S+@\S+\.\S+/.test(email)) return;
 
-      setIsCheckingEmail(true)
+      setIsCheckingEmail(true);
       try {
         const { count, error } = await supabase
           .from('users')
           .select('*', { count: 'exact', head: true })
-          .eq('email', email)
+          .eq('email', email);
 
         if (error) {
-          console.error("Email check error:", error)
-          return
+          console.error("Email check error:", error);
+          return;
         }
 
-        const emailExists = count !== null && count > 0
-        setIsEmailTaken(emailExists)
+        const emailExists = count !== null && count > 0;
+        setIsEmailTaken(emailExists);
         setFieldErrors(prev => ({
           ...prev,
           email: emailExists ? "An account with this email already exists." : undefined
-        }))
+        }));
       } catch (error) {
-        console.error("Email check error:", error)
-        setIsEmailTaken(false)
-        setFieldErrors(prev => ({
-          ...prev,
-          email: undefined
-        }))
+        console.error("Email check error:", error);
       } finally {
-        setIsCheckingEmail(false)
+        setIsCheckingEmail(false);
       }
     }, 500),
     [supabase]
-  )
+  );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -235,58 +258,99 @@ export default function SignUpPage() {
     setError("");
 
     try {
-      // Step 1: Create auth user
-      const { data: { user }, error: signUpError } = await supabase.auth.signUp({
+      // First create the user in Supabase
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
+        options: {
+          emailRedirectTo: 'https://lkjgardensigando.com/auth/callback',
+          data: {
+            full_name: formData.fullName,
+            phone_number: formData.phoneNumber,
+            block_number: formData.block,
+            flat_number: formData.flatNumber,
+            role: 'resident'
+          }
+        }
       });
 
       if (signUpError) throw signUpError;
-      if (!user) throw new Error('Signup failed - no user returned');
 
-      // Step 2: Create user profile
-      const { error: profileError } = await supabase
-        .from('users')
-        .insert({
-          id: user.id,
-          email: formData.email,
-          full_name: formData.fullName,
-          phone_number: formData.phoneNumber,
-          block_number: formData.block,
-          flat_number: formData.flatNumber,
-          role: 'resident'
-        });
-
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        throw profileError;
+      if (!data.user) {
+        throw new Error('Signup failed - no user data returned');
       }
 
-      // Step 3: Create resident record
-      const { error: residentError } = await supabase
-        .from('residents')
-        .insert([
-          {
-            user_id: user.id,
-            status: 'active'
-          }
-        ])
+      // Send custom welcome email using Resend
+      const response = await fetch('/api/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: formData.email,
+          subject: 'Welcome to LKJ Gardens Igando',
+          html: `
+                    <h1>Welcome to LKJ Gardens Igando</h1>
+                    <p>Thank you for signing up! You will receive a separate email to verify your account.</p>
+                    <p>Please check your inbox and click the verification link to complete your registration.</p>
+                    <br />
+                    <p>Best regards,</p>
+                    <p>LKJ Gardens Igando Team</p>
+                `
+        }),
+      });
 
-      if (residentError) {
-        console.error('Resident creation error:', residentError);
-        throw residentError;
+      if (!response.ok) {
+        console.error('Failed to send welcome email');
       }
 
-      toast.success('Account created successfully!');
-      router.push('/auth/login');
+      localStorage.setItem('pendingSignup', JSON.stringify({
+        email: formData.email,
+        fullName: formData.fullName,
+        phoneNumber: formData.phoneNumber,
+        block: formData.block,
+        flatNumber: formData.flatNumber,
+        timestamp: new Date().toISOString()
+      }));
 
-    } catch (error) {
-      console.error('Full error:', error);
-      setError(error instanceof Error ? error.message : 'An error occurred');
+      toast.success('Account created! Please check your email for verification.');
+      router.push('/auth/verify-email');
+
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      setError(error.message);
+      toast.error('Signup failed');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const isFormValid = () => {
+    return !Object.values(fieldErrors).some(error => error) &&
+      Object.values(formData).every(value => value) &&
+      formData.password === formData.confirmPassword;
+  };
+
+  const resetForm = () => {
+    setFormData({
+      email: '',
+      password: '',
+      confirmPassword: '',
+      fullName: '',
+      phoneNumber: '',
+      block: '',
+      flatNumber: '',
+    });
+    setFieldErrors({});
+    setError('');
+    setPreviewLocation('');
+  };
+
+  useEffect(() => {
+    return () => {
+      debouncedCheckEmail.cancel();
+    };
+  }, [debouncedCheckEmail]);
 
   if (isLoading) {
     return <LoadingScreen />
@@ -307,19 +371,28 @@ export default function SignUpPage() {
         <Sheet>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" className="md:hidden">
-              <Menu className="h-24 w-24 text-[#8B0000]" />
+              <Menu className="h-6 w-6 text-[#8B0000]" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="top" className={`w-full py-6 px-4 ${quicksand.className} font-sans`}>
-            <SheetHeader>
-              <SheetTitle></SheetTitle>
-            </SheetHeader>
-            <div className="space-y-4">
+          <SheetContent
+            side="top"
+            className={`w-full py-4 px-4 ${quicksand.className} font-sans`}
+          >
+            <div className="flex flex-col items-center justify-center space-y-3 mt-2">
               <Link href="/auth/login">
-                <Button variant="outline" className="w-full justify-center mt-20">Login</Button>
+                <Button
+                  variant="outline"
+                  className="w-[200px] justify-center h-9 text-[#8B0000] border-[#8B0000]"
+                >
+                  Login
+                </Button>
               </Link>
               <Link href="/auth/signup">
-                <Button className="w-full justify-center bg-[#8B0000] text-white">Sign up</Button>
+                <Button
+                  className="w-[200px] justify-center h-9 bg-[#8B0000] text-white hover:bg-[#6B0000]"
+                >
+                  Sign up
+                </Button>
               </Link>
             </div>
           </SheetContent>
@@ -345,6 +418,12 @@ export default function SignUpPage() {
               <div className="text-green-500 text-center text-sm w-[350px]">{successMessage}</div>
             )}
 
+            {/* Personal Information */}
+            <div className="w-[350px] mb-2">
+              <h3 className="text-lg font-semibold text-gray-700">Personal Information</h3>
+            </div>
+            {/* Name, Email, Phone fields */}
+
             <div className="w-[350px] space-y-1">
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -355,7 +434,11 @@ export default function SignUpPage() {
                   required
                   value={formData.fullName}
                   onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.fullName ? 'border-red-500' : ''}`}
+                  className={`pl-10 h-12 w-full ${fieldErrors.fullName ? 'border-red-500' : ''} text-base appearance-none`}
+                  style={{
+                    WebkitAppearance: 'none',
+                    fontSize: '16px'
+                  }}
                 />
               </div>
               {fieldErrors.fullName && (
@@ -373,7 +456,11 @@ export default function SignUpPage() {
                   required
                   value={formData.email}
                   onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.email ? 'border-red-500' : ''}`}
+                  className={`pl-10 h-12 w-full ${fieldErrors.email ? 'border-red-500' : ''} text-base appearance-none`}
+                  style={{
+                    WebkitAppearance: 'none',
+                    fontSize: '16px'
+                  }}
                 />
                 {isCheckingEmail && (
                   <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
@@ -396,7 +483,11 @@ export default function SignUpPage() {
                   required
                   value={formData.phoneNumber}
                   onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.phoneNumber ? 'border-red-500' : ''}`}
+                  className={`pl-10 h-12 w-full ${fieldErrors.phoneNumber ? 'border-red-500' : ''} text-base appearance-none`}
+                  style={{
+                    WebkitAppearance: 'none',
+                    fontSize: '16px'
+                  }}
                 />
               </div>
               {fieldErrors.phoneNumber && (
@@ -404,11 +495,23 @@ export default function SignUpPage() {
               )}
             </div>
 
+            {/* Residence Information */}
+            <div className="w-[350px] mb-2 mt-6">
+              <h3 className="text-lg font-semibold text-gray-700">Residence Information</h3>
+            </div>
+            {/* Block and Flat fields */}
+
             <div className="w-[350px] space-y-1">
               <div className="relative">
                 <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 z-10" />
                 <Select value={formData.block} onValueChange={handleBlockChange}>
-                  <SelectTrigger className={`pl-10 h-12 w-full ${fieldErrors.block ? 'border-red-500' : ''}`}>
+                  <SelectTrigger
+                    className={`pl-10 h-12 w-full ${fieldErrors.block ? 'border-red-500' : ''} text-base appearance-none`}
+                    style={{
+                      WebkitAppearance: 'none',
+                      fontSize: '16px'
+                    }}
+                  >
                     <SelectValue placeholder="Select Block" />
                   </SelectTrigger>
                   <SelectContent
@@ -437,7 +540,7 @@ export default function SignUpPage() {
               <div className="relative">
                 <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 z-10" />
                 <Select value={formData.flatNumber} onValueChange={handleFlatChange}>
-                  <SelectTrigger className={`pl-10 h-12 w-full ${fieldErrors.flatNumber ? 'border-red-500' : ''}`}>
+                  <SelectTrigger className={`pl-10 h-12 w-full ${fieldErrors.flatNumber ? 'border-red-500' : ''} text-base appearance-none`} style={{ WebkitAppearance: 'none', fontSize: '16px' }}>
                     <SelectValue placeholder="Select Flat Number" />
                   </SelectTrigger>
                   <SelectContent
@@ -468,6 +571,12 @@ export default function SignUpPage() {
               </div>
             )}
 
+            {/* Account Security */}
+            <div className="w-[350px] mb-2 mt-6">
+              <h3 className="text-lg font-semibold text-gray-700">Account Security</h3>
+            </div>
+            {/* Password Field */}
+
             <div className="w-[350px] space-y-1">
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -478,35 +587,107 @@ export default function SignUpPage() {
                   required
                   value={formData.password}
                   onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.password ? 'border-red-500' : ''}`}
+                  className={`pl-10 h-12 w-full ${fieldErrors.password ? 'border-red-500' : ''} text-base appearance-none`}
+                  style={{
+                    WebkitAppearance: 'none',
+                    fontSize: '16px'
+                  }}
                 />
-                {showPassword ? (
-                  <EyeOff
-                    onClick={() => setShowPassword(false)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-                  />
-                ) : (
-                  <Eye
-                    onClick={() => setShowPassword(true)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-                  />
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                >
+                  {showPassword ? (
+                    <EyeOff className="text-gray-400" />
+                  ) : (
+                    <Eye className="text-gray-400" />
+                  )}
+                </button>
               </div>
-              {fieldErrors.password && (
+              {fieldErrors.password ? (
                 <p className="text-red-500 text-sm">{fieldErrors.password}</p>
+              ) : (
+                <p className="text-gray-500 text-xs">
+                  Password must be at least 8 characters long with uppercase, lowercase, numbers, and special characters
+                </p>
+              )}
+            </div>
+
+            {/* Confirm Password Field */}
+            <div className="w-[350px] space-y-1">
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <Input
+                  name="confirmPassword"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Confirm Password"
+                  required
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  className={`pl-10 h-12 w-full ${fieldErrors.confirmPassword ? 'border-red-500' : ''} text-base appearance-none`}
+                  style={{
+                    WebkitAppearance: 'none',
+                    fontSize: '16px'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                >
+                  {showPassword ? (
+                    <EyeOff className="text-gray-400" />
+                  ) : (
+                    <Eye className="text-gray-400" />
+                  )}
+                </button>
+              </div>
+              {fieldErrors.confirmPassword && (
+                <p className="text-red-500 text-sm">{fieldErrors.confirmPassword}</p>
               )}
             </div>
 
             <Button
               type="submit"
-              disabled={isLoading || isEmailTaken || isCheckingEmail}
+              disabled={!isFormValid() || isLoading || isEmailTaken || isCheckingEmail || isButtonDisabled}
               className="w-[350px] h-12 bg-[#8B0000] text-white hover:bg-[#660000] transition-colors disabled:bg-gray-400"
             >
-              {isLoading ? "Signing up..." : "Sign up"}
+              {isLoading ? (
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-2" />
+                  Signing up...
+                </div>
+              ) : isButtonDisabled ? (
+                "Please wait..."
+              ) : (
+                "Sign up"
+              )}
             </Button>
           </form>
         </div>
       </main>
+
+      <div className="w-[350px] text-center mt-4">
+        <p className="text-gray-600">
+          Already have an account?{" "}
+          <Link href="/auth/login" className="text-[#8B0000] hover:underline">
+            Login here
+          </Link>
+        </p>
+      </div>
+
+      <footer className="py-4 text-center text-base md:text-lg font-medium text-gray-500">
+        Powered by{" "}
+        <a
+          href="https://uvise.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[#8B0000] hover:underline"
+        >
+          UVISE
+        </a>
+      </footer>
     </div>
   )
 }

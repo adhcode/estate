@@ -66,6 +66,9 @@ import { toast } from 'sonner'
 import { useSearchParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { Label } from "@/components/ui/label"
+import { Toaster } from "sonner"
+
+
 
 type Visit = {
     id: string;
@@ -78,7 +81,7 @@ type Visit = {
     check_in_time: string | null;
     check_out_time: string | null;
     duration: string | null;
-    status: 'pending' | 'active' | 'checked_in' | 'checked_out' | 'cancelled' | 'issue' | 'completed';
+    status: 'pending' | 'active' | 'completed' | 'cancelled' | 'issue';
     created_at: string;
     visit_date: string;
     visit_time: string;
@@ -110,19 +113,45 @@ type VisitResponse = {
     } | null;
 }
 
-const filterVisits = (visits: Visit[], selectedBlock: string, date: Date | undefined, search: string) => {
-    return visits.filter(visitor => {
-        const matchesBlock = selectedBlock === "all" || visitor.block_number === selectedBlock;
-        const matchesDate = !date || format(new Date(visitor.created_at), "yyyy-MM-dd") === format(date, "yyyy-MM-dd");
-        const matchesSearch = search.trim() === "" ||
-            visitor.full_name.toLowerCase().includes(search.toLowerCase()) ||
-            visitor.guest_id.toLowerCase().includes(search.toLowerCase()) ||
-            visitor.host_name?.toLowerCase().includes(search.toLowerCase()) ||
-            visitor.block_number.toLowerCase().includes(search.toLowerCase()) ||
-            visitor.flat_number.toLowerCase().includes(search.toLowerCase());
+// Define the type for searchable fields
+type SearchableField = keyof Pick<Visit, 'full_name' | 'guest_id' | 'host_name' | 'block_number' | 'flat_number'>;
 
-        return matchesBlock && matchesDate && matchesSearch;
+// Define the searchable fields constant with proper typing
+const searchableFields: SearchableField[] = [
+    'full_name',
+    'guest_id',
+    'host_name',
+    'block_number',
+    'flat_number'
+];
+
+const filterVisits = (visits: Visit[], filters: {
+    block: string;
+    date?: Date;
+    search: string;
+    status: string;
+}) => {
+    return visits.filter(visitor => {
+        const matchesBlock = filters.block === "all" || visitor.block_number === filters.block;
+        const matchesDate = !filters.date ||
+            format(new Date(visitor.created_at), "yyyy-MM-dd") === format(filters.date, "yyyy-MM-dd");
+        const matchesSearch = !filters.search.trim() ||
+            searchableFields.some((field: SearchableField) =>
+                visitor[field]?.toLowerCase().includes(filters.search.toLowerCase())
+            );
+        const matchesStatus = filters.status === "all" || getStatusMatch(visitor.status, filters.status);
+
+        return matchesBlock && matchesDate && matchesSearch && matchesStatus;
     });
+};
+
+const getStatusMatch = (visitorStatus: Visit['status'], filterStatus: string) => {
+    switch (filterStatus) {
+        case 'pending': return visitorStatus === 'pending';
+        case 'active': return visitorStatus === 'active';
+        case 'completed': return visitorStatus === 'completed';
+        default: return true;
+    }
 };
 
 const getStatusBadgeStyles = (status: string) => {
@@ -197,8 +226,8 @@ const getStatusCounts = (visits: Visit[]) => {
     return {
         all: visits.length,
         expected: visits.filter(v => v.status === 'pending').length,
-        checked_in: visits.filter(v => v.status === 'checked_in').length,
-        checked_out: visits.filter(v => v.status === 'checked_out').length
+        checked_in: visits.filter(v => v.status === 'active').length,
+        checked_out: visits.filter(v => v.status === 'completed').length
     }
 }
 
@@ -283,6 +312,99 @@ const MobileDatePicker = ({ date, setDate, isOpen, setIsOpen }: {
     </Sheet>
 );
 
+// Desktop Date Picker Component
+const DesktopDatePicker = ({ date, setDate }: {
+    date: Date | undefined;
+    setDate: (date: Date | undefined) => void;
+}) => (
+    <Popover>
+        <PopoverTrigger asChild>
+            <Button
+                variant="outline"
+                className={`w-[240px] justify-start text-left font-normal ${!date && "text-muted-foreground"}`}
+            >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {date ? format(date, "PPP") : <span>Pick a date</span>}
+            </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+                mode="single"
+                selected={date}
+                onSelect={setDate}
+                disabled={{ after: new Date() }}
+                initialFocus
+                className="rounded-md border-0"
+                classNames={{
+                    months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+                    head_row: "flex",
+                    head_cell: "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
+                    row: "flex w-full mt-2",
+                    cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 [&:has([aria-selected])]:bg-accent",
+                    day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
+                    day_range_end: "day-range-end",
+                    day_selected: "bg-[#832131] text-white hover:bg-[#932131] hover:text-white focus:bg-[#832131] focus:text-white",
+                    day_today: "bg-accent text-accent-foreground",
+                    day_outside: "text-muted-foreground opacity-50",
+                    day_disabled: "text-muted-foreground opacity-50",
+                    day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                    day_hidden: "invisible",
+                    nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+                    nav_button_previous: "absolute left-1",
+                    nav_button_next: "absolute right-1",
+                    caption: "relative h-10 flex items-center justify-center text-sm font-medium",
+                }}
+            />
+            {date && (
+                <div className="p-3 border-t border-border">
+                    <Button
+                        variant="ghost"
+                        className="w-full justify-center text-sm text-muted-foreground hover:text-foreground"
+                        onClick={() => setDate(undefined)}
+                    >
+                        <X className="mr-2 h-4 w-4" />
+                        Clear date
+                    </Button>
+                </div>
+            )}
+        </PopoverContent>
+    </Popover>
+);
+
+// Use this component conditionally based on screen size
+const DatePickerComponent = ({ date, setDate, isDatePickerOpen, setIsDatePickerOpen }: {
+    date: Date | undefined;
+    setDate: (date: Date | undefined) => void;
+    isDatePickerOpen: boolean;
+    setIsDatePickerOpen: (open: boolean) => void;
+}) => {
+    const [isMobile, setIsMobile] = useState(false);
+
+    useEffect(() => {
+        const checkIfMobile = () => {
+            setIsMobile(window.innerWidth < 768); // 768px is typical tablet/mobile breakpoint
+        };
+
+        checkIfMobile();
+        window.addEventListener('resize', checkIfMobile);
+
+        return () => window.removeEventListener('resize', checkIfMobile);
+    }, []);
+
+    if (isMobile) {
+        return (
+            <MobileDatePicker
+                date={date}
+                setDate={setDate}
+                isOpen={isDatePickerOpen}
+                setIsOpen={setIsDatePickerOpen}
+            />
+        );
+    }
+
+    return <DesktopDatePicker date={date} setDate={setDate} />;
+};
+
 export default function VisitorLogbook() {
     const supabase = createClientComponentClient()
     const [isFilterOpen, setIsFilterOpen] = React.useState(false)
@@ -317,9 +439,9 @@ export default function VisitorLogbook() {
 
     const filterOptions = [
         { id: "all", label: "All Guests" },
-        { id: "expected", label: "Expected" },
-        { id: "checked_in", label: "Checked In" },
-        { id: "checked_out", label: "Checked Out" },
+        { id: "pending", label: "Expected" },
+        { id: "active", label: "Checked In" },
+        { id: "completed", label: "Checked Out" },
     ]
 
     const blockOptions = [
@@ -341,9 +463,9 @@ export default function VisitorLogbook() {
 
             // Status filter
             const matchesStatus = filterType === "all" ||
-                (filterType === "expected" && visitor.status === "pending") ||
-                (filterType === "checked_in" && visitor.status === "checked_in") ||
-                (filterType === "checked_out" && visitor.status === "checked_out");
+                (filterType === "pending" && visitor.status === "pending") ||
+                (filterType === "active" && visitor.status === "active") ||
+                (filterType === "completed" && visitor.status === "completed");
 
             // Search filter
             const matchesSearch = searchQuery.trim() === "" ||
@@ -468,8 +590,10 @@ export default function VisitorLogbook() {
                             px-2.5 py-1 rounded-full text-xs font-medium
                             ${getStatusBadgeStyles(visitor.status)}
                         `}>
-                            {visitor.status === 'checked_out' ? 'Checked Out' :
-                                visitor.status === 'checked_in' ? 'Checked In' : 'Pending'}
+                            {visitor.status === 'completed' ? 'Checked Out' :
+                                visitor.status === 'active' ? 'Checked In' :
+                                    visitor.status === 'pending' ? 'Expected' :
+                                        visitor.status}
                         </span>
                     </div>
                 </div>
@@ -520,193 +644,225 @@ export default function VisitorLogbook() {
     const fetchVisits = async () => {
         try {
             setIsLoading(true);
+            console.log('Fetching visits...'); // Debug log
 
-            const { data: visitsData, error: visitsError } = await supabase
+            // First get the guests data
+            const { data: guestsData, error: guestsError } = await supabase
                 .from('guests')
-                .select(`
-                    *,
-                    resident:residents!primary_resident_id (
-                        id,
-                        first_name,
-                        last_name,
-                        block_number,
-                        flat_number,
-                        email,
-                        phone_number
-                    ),
-                    guest_issues (
-                        status,
-                        resolution_report,
-                        resolved_at
-                    )
-                `)
+                .select('*')
                 .order('created_at', { ascending: false });
 
-            if (visitsError) throw visitsError;
+            if (guestsError) throw guestsError;
 
-            const transformedVisits = visitsData?.map(visit => {
-                const resident = Array.isArray(visit.resident) ? visit.resident[0] : visit.resident;
-                const issue = Array.isArray(visit.guest_issues) ? visit.guest_issues[0] : visit.guest_issues;
+            if (!guestsData?.length) {
+                setVisits([]);
+                return;
+            }
 
-                // Keep the original status if it's 'active' or 'completed'
-                const status = issue?.status === 'resolved'
-                    ? (visit.status === 'completed' ? 'completed' : 'active')
-                    : visit.status || 'pending';
+            // Then get the users data for the host names
+            const userIds = guestsData
+                .map(guest => guest.user_id)
+                .filter(id => id) // Remove null/undefined values
+                .filter((id, index, self) => self.indexOf(id) === index); // Remove duplicates
 
-                return {
-                    ...visit,
-                    host_name: resident
-                        ? `${resident.first_name} ${resident.last_name}`
-                        : 'Unknown Resident',
-                    block_number: `Block ${resident?.block_number || 'Unknown'}`,
-                    flat_number: `Flat ${resident?.flat_number || 'Unknown'}`,
-                    email: resident?.email || visit.email || null,
-                    phone_number: resident?.phone_number || visit.phone_number || null,
-                    check_in_time: visit.check_in_time || null,
-                    check_out_time: visit.check_out_time || null,
-                    duration: visit.duration || null,
-                    status: status,
-                    resolution_report: issue?.resolution_report || null,
-                    resolved_at: issue?.resolved_at || null
-                };
-            }) || [];
+            const { data: usersData, error: usersError } = await supabase
+                .from('users')
+                .select('id, full_name')
+                .in('id', userIds);
 
+            if (usersError) throw usersError;
+
+            // Create a map of user IDs to names for quick lookup
+            const userMap = (usersData || []).reduce((acc, user) => {
+                acc[user.id] = user.full_name;
+                return acc;
+            }, {} as Record<string, string>);
+
+            // Transform the data
+            const transformedVisits = guestsData.map(guest => ({
+                id: guest.id,
+                guest_id: guest.guest_id,
+                primary_resident_id: guest.user_id || '',
+                host_name: userMap[guest.user_id] || 'No Host',
+                full_name: guest.full_name || '',
+                email: guest.email || null,
+                phone_number: guest.phone_number || null,
+                check_in_time: guest.check_in_time || null,
+                check_out_time: guest.check_out_time || null,
+                duration: guest.duration || null,
+                status: guest.status || 'pending',
+                created_at: guest.created_at || new Date().toISOString(),
+                visit_date: guest.visit_date || guest.created_at || new Date().toISOString(),
+                visit_time: guest.visit_time || '',
+                purpose_of_visit: guest.purpose_of_visit || null,
+                block_number: guest.block_number || '',
+                flat_number: guest.flat_number || '',
+                resolution_report: guest.resolution_report || null,
+                resolved_at: guest.resolved_at || null
+            }));
+
+            console.log('Transformed visits:', transformedVisits);
             setVisits(transformedVisits);
 
         } catch (error) {
             console.error('Failed to fetch visits:', error);
             toast.error('Failed to load visits');
+            setVisits([]);
         } finally {
             setIsLoading(false);
         }
     };
 
     const handleCheckIn = async (guestId: string) => {
-        setLoadingCheckIn(guestId)
+        setLoadingCheckIn(guestId);
         try {
+            const now = new Date();
             const guest = visits.find(v => v.guest_id === guestId);
-            if (!guest) throw new Error('Guest not found');
 
-            const now = new Date()
-            const displayTime = now.toLocaleTimeString('en-US', {
+            if (!guest) {
+                throw new Error('Guest not found');
+            }
+
+            // Update the guest record
+            const { data, error } = await supabase
+                .from('guests')
+                .update({
+                    status: 'active',
+                    check_in_time: now.toISOString()
+                })
+                .eq('guest_id', guestId)
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Check-in error:', error);
+                throw error;
+            }
+
+            // Update local state
+            setVisits(prev => prev.map(visit =>
+                visit.guest_id === guestId
+                    ? {
+                        ...visit,
+                        status: 'active',
+                        check_in_time: now.toISOString()
+                    }
+                    : visit
+            ));
+
+            // Format time for toast message
+            const formattedTime = now.toLocaleTimeString('en-US', {
                 hour: '2-digit',
                 minute: '2-digit',
                 hour12: true
             });
 
-            const { error } = await supabase
-                .from('guests')
-                .update({
-                    status: 'active',
-                    check_in_time: now.toISOString(),
-                    updated_at: now.toISOString()
-                })
-                .eq('guest_id', guestId)
-
-            if (error) throw error;
-
-            // Update local state
-            setVisits(prevVisits => prevVisits.map(visit => {
-                if (visit.guest_id === guestId) {
-                    return {
-                        ...visit,
-                        status: 'active',
-                        check_in_time: now.toISOString()
-                    }
-                }
-                return visit
-            }))
-
             toast.success(
                 <div className="flex flex-col gap-1">
-                    <span className="font-medium">Guest Checked In</span>
-                    <span className="text-sm">{guest.full_name}</span>
-                    <span className="text-xs text-gray-500">at {displayTime}</span>
+                    <div className="font-medium">✅ Check-In Successful</div>
+                    <div className="text-sm">
+                        You have checked in <span className="font-semibold">{guest.full_name}</span>
+                    </div>
+                    <div className="text-sm text-gray-500">
+                        Location: Block {guest.block_number}, Flat {guest.flat_number}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                        Time: {formattedTime}
+                    </div>
                 </div>
-            )
+            );
 
         } catch (error: any) {
-            console.error('Failed to check in:', error)
-            toast.error(`Failed to check in: ${error.message}`)
+            console.error('Check-in failed:', error);
+            toast.error(
+                <div className="flex flex-col gap-1">
+                    <div className="font-medium">❌ Check-In Failed</div>
+                    <div className="text-sm">{error.message}</div>
+                </div>
+            );
         } finally {
-            setLoadingCheckIn(null)
+            setLoadingCheckIn(null);
         }
-    }
+    };
 
     const handleCheckOut = async (guestId: string) => {
-        setLoadingCheckOut(guestId)
+        setLoadingCheckOut(guestId);
         try {
-            const now = new Date()
+            const now = new Date();
+            const guest = visits.find(v => v.guest_id === guestId);
 
-            // Find the visitor's name and check-in time
-            const visit = visits.find(v => v.guest_id === guestId)
-            if (!visit?.check_in_time) {
-                throw new Error('No check-in time found')
+            if (!guest?.check_in_time) {
+                throw new Error('No check-in time found');
             }
 
-            // Calculate duration using the timestamps
-            const checkInDate = new Date(visit.check_in_time)
-            const durationMs = now.getTime() - checkInDate.getTime()
-            const hours = Math.floor(durationMs / (1000 * 60 * 60))
-            const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60))
-            const duration = `${hours}h ${minutes}m`
+            // Calculate duration
+            const checkInTime = new Date(guest.check_in_time);
+            const durationMs = now.getTime() - checkInTime.getTime();
+            const hours = Math.floor(durationMs / (1000 * 60 * 60));
+            const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+            const duration = `${hours}h ${minutes}m`;
 
-            const { data, error } = await supabase
+            // Update database
+            const { error } = await supabase
                 .from('guests')
                 .update({
                     status: 'completed',
                     check_out_time: now.toISOString(),
-                    duration: duration,
-                    updated_at: now.toISOString()
+                    duration: duration
                 })
-                .eq('guest_id', guestId)
-                .select()
+                .eq('guest_id', guestId);
 
-            if (error) {
-                console.error('Check-out error:', error)
-                throw error
-            }
+            if (error) throw error;
 
-            console.log('Update response:', data)
-
-            if (data) {
-                // Format the time for display
-                const displayTime = now.toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true
-                })
-
-                // Update local state
-                setVisits(prevVisits => prevVisits.map(visit => {
-                    if (visit.guest_id === guestId) {
-                        return {
-                            ...visit,
-                            status: 'completed',
-                            check_out_time: now.toISOString(),
-                            duration: duration
-                        }
+            // Update local state
+            setVisits(prev => prev.map(visit =>
+                visit.guest_id === guestId
+                    ? {
+                        ...visit,
+                        status: 'completed',
+                        check_out_time: now.toISOString(),
+                        duration: duration
                     }
-                    return visit
-                }))
+                    : visit
+            ));
 
-                toast.success(
-                    <div className="flex flex-col gap-1">
-                        <span className="font-medium">Successfully checked out</span>
-                        <span className="text-sm">{visit.full_name}</span>
-                        <span className="text-xs text-gray-500">at {displayTime}</span>
-                        <span className="text-xs text-gray-500">Duration: {duration}</span>
+            // Format time for toast message
+            const formattedTime = now.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+
+            toast.success(
+                <div className="flex flex-col gap-1">
+                    <div className="font-medium">✅ Check-Out Successful</div>
+                    <div className="text-sm">
+                        You have checked out <span className="font-semibold">{guest.full_name}</span>
                     </div>
-                )
-            }
+                    <div className="text-sm text-gray-500">
+                        Location: Block {guest.block_number}, Flat {guest.flat_number}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                        Time: {formattedTime}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                        Visit Duration: {duration}
+                    </div>
+                </div>
+            );
 
         } catch (error: any) {
-            console.error('Failed to check out:', error)
-            toast.error(`Failed to check out: ${error.message}`)
+            console.error('Check-out failed:', error);
+            toast.error(
+                <div className="flex flex-col gap-1">
+                    <div className="font-medium">❌ Check-Out Failed</div>
+                    <div className="text-sm">{error.message}</div>
+                </div>
+            );
         } finally {
-            setLoadingCheckOut(null)
+            setLoadingCheckOut(null);
         }
-    }
+    };
 
     React.useEffect(() => {
         fetchVisits()
@@ -911,9 +1067,9 @@ export default function VisitorLogbook() {
                                                     <div className="font-medium">{option.label}</div>
                                                     <div className="text-sm opacity-80">
                                                         {option.id === 'all' && 'View all visitors'}
-                                                        {option.id === 'expected' && 'Visitors not checked in'}
-                                                        {option.id === 'checked_in' && 'Currently checked in visitors'}
-                                                        {option.id === 'checked_out' && 'Completed visits'}
+                                                        {option.id === 'pending' && 'Visitors not checked in'}
+                                                        {option.id === 'active' && 'Currently checked in visitors'}
+                                                        {option.id === 'completed' && 'Completed visits'}
                                                     </div>
                                                 </div>
                                             ))}
@@ -1282,8 +1438,9 @@ export default function VisitorLogbook() {
                                             key={visit.id}
                                             className={`
                                                 transition-all duration-200 hover:bg-gray-50
-                                                ${visit.status === 'checked_out' ? 'bg-gray-50/50' :
-                                                    visit.status === 'checked_in' ? 'bg-green-50/50' : ''}
+                                                ${visit.status === 'completed' ? 'bg-gray-50/50' :  // Changed from 'checked_out'
+                                                    visit.status === 'active' ? 'bg-green-50/50' : ''  // Changed from 'checked_in'
+                                                }
                                                 ${visit.guest_id === highlightedId ? 'bg-yellow-100 animate-pulse' : ''}
                                                 h-20 border-0
                                             `}
@@ -1416,11 +1573,10 @@ export default function VisitorLogbook() {
                                                     ${getStatusBadgeStyles(visit.status)}
                                                 `}>
                                                     {visit.status === 'completed' ? 'Completed' :
-                                                        visit.status === 'active' ? 'Active' :
-                                                            visit.status === 'checked_out' ? 'Checked Out' :
-                                                                visit.status === 'checked_in' ? 'Checked In' :
-                                                                    visit.status === 'cancelled' ? 'Cancelled' :
-                                                                        visit.status === 'issue' ? 'Issue' : 'Pending'}
+                                                        visit.status === 'active' ? 'Checked In' :
+                                                            visit.status === 'pending' ? 'Expected' :
+                                                                visit.status === 'cancelled' ? 'Cancelled' :
+                                                                    visit.status === 'issue' ? 'Issue' : 'Pending'}
                                                 </span>
                                             </TableCell>
                                         </TableRow>
@@ -1638,6 +1794,7 @@ export default function VisitorLogbook() {
                     </div>
                 </DialogContent>
             </Dialog>
+            <Toaster />
         </div>
     )
 }

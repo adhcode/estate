@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog"
 import { Quicksand } from 'next/font/google'
 import { LoadingScreen } from "@/components/ui/loading-screen"
+import { toast } from "react-hot-toast"
 
 const quicksand = Quicksand({
     subsets: ['latin'],
@@ -43,6 +44,8 @@ export default function ProfilePage() {
     useEffect(() => {
         async function loadUserProfile() {
             try {
+                console.log('Loading user profile...')
+
                 const { data: { user: authUser } } = await supabase.auth.getUser()
                 console.log('Auth user:', authUser)
 
@@ -51,31 +54,31 @@ export default function ProfilePage() {
                     return
                 }
 
-                const { data: resident, error } = await supabase
-                    .from('residents')
+                // Fetch user data
+                const { data: userData, error: userError } = await supabase
+                    .from('users')
                     .select('*')
-                    .eq('user_id', authUser.id)
+                    .eq('id', authUser.id)
                     .single()
 
-                console.log('Resident data:', resident)
-                console.log('Resident error:', error)
+                console.log('User data:', userData)
 
-                if (error) {
-                    console.error('Error fetching resident:', error.message)
+                if (userError) {
+                    console.error('Error fetching user:', userError.message)
                     return
                 }
 
-                if (resident) {
-                    const userData = {
-                        full_name: `${resident.first_name} ${resident.last_name}`.trim(),
+                if (userData) {
+                    const userProfile = {
+                        full_name: userData.full_name || '',
                         email: authUser.email || '',
-                        phone_number: resident.phone_number || '',
-                        block_number: resident.block_number || '',
-                        flat_number: resident.flat_number || '',
-                        avatar_url: resident.avatar_url
+                        phone_number: userData.phone_number || '',
+                        block_number: userData.block_number || '',
+                        flat_number: userData.flat_number || '',
+                        avatar_url: userData.avatar_url
                     }
-                    console.log('Setting user state:', userData)
-                    setUser(userData)
+                    console.log('Setting user state:', userProfile)
+                    setUser(userProfile)
                 }
             } catch (error) {
                 console.error('Error:', error)
@@ -122,7 +125,7 @@ export default function ProfilePage() {
                 .from('avatars')
                 .getPublicUrl(fileName)
 
-            // Update user with new avatar URL
+            // Update user with new avatar URL in users table
             const { error: updateError } = await supabase
                 .from('users')
                 .update({ avatar_url: publicUrl })
@@ -131,9 +134,10 @@ export default function ProfilePage() {
             if (updateError) throw updateError
 
             setUser(prev => ({ ...prev, avatar_url: publicUrl }))
+            toast.success('Profile picture updated successfully')
         } catch (error) {
             console.error('Error uploading image:', error)
-            // You might want to show an error toast here
+            toast.error('Failed to update profile picture')
         } finally {
             setImageUploading(false)
         }

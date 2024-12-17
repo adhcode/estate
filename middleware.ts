@@ -6,39 +6,47 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
   const supabase = createMiddlewareClient({ req, res })
 
+  // Allow access to the homepage
+  if (req.nextUrl.pathname === '/') {
+    return res
+  }
+
   const {
     data: { session },
   } = await supabase.auth.getSession()
 
-  // If no session and trying to access protected routes
+  // If no session, allow access to homepage and auth routes only
   if (!session) {
     const isAuthRoute = req.nextUrl.pathname.startsWith('/auth')
-    if (!isAuthRoute) {
+    if (!isAuthRoute && req.nextUrl.pathname !== '/') {
       return NextResponse.redirect(new URL('/auth/login', req.url))
     }
     return res
   }
 
-  // If logged in and trying to access auth routes
-  if (session) {
-    const isAuthRoute = req.nextUrl.pathname.startsWith('/auth')
-    if (isAuthRoute) {
-      // Get user role
-      const { data: userData } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', session.user.id)
-        .single()
-
-      // Redirect based on role
-      if (userData?.role === 'resident') {
-        return NextResponse.redirect(new URL('/resident/dashboard', req.url))
-      } else if (userData?.role === 'household_member') {
-        return NextResponse.redirect(new URL('/household/dashboard', req.url))
-      } else if (userData?.role === 'admin') {
-        return NextResponse.redirect(new URL('/admin/dashboard', req.url))
-      }
+  // Check if email is verified
+  if (!session.user.email_confirmed_at) {
+    const isVerifyEmailPage = req.nextUrl.pathname === '/auth/verify-email'
+    const isAuthCallback = req.nextUrl.pathname === '/auth/callback'
+    
+    // Allow access to verification page and auth callback
+    if (isVerifyEmailPage || isAuthCallback) {
+      return res
     }
+
+    // Redirect to verification page for all other routes except homepage
+    if (!req.nextUrl.pathname.startsWith('/auth') && req.nextUrl.pathname !== '/') {
+      console.log('Email not verified - redirecting to verification page')
+      return NextResponse.redirect(new URL('/auth/verify-email', req.url))
+    }
+  }
+
+  // For verified users, handle route access
+  const isAuthRoute = req.nextUrl.pathname.startsWith('/auth')
+  
+  // Redirect verified users away from auth routes (except callback)
+  if (isAuthRoute && req.nextUrl.pathname !== '/auth/callback') {
+    return NextResponse.redirect(new URL('/resident/dashboard', req.url))
   }
 
   return res
@@ -47,12 +55,12 @@ export async function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except:
+     * Match all request paths except for the ones starting with:
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public folder
+     * - public (public files)
      */
     '/((?!_next/static|_next/image|favicon.ico|public).*)',
-  ]
+  ],
 }

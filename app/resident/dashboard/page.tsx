@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { LoadingScreen } from "@/components/ui/loading-screen"
 import { toast } from "sonner";
 import { createClient } from '@supabase/supabase-js'
+import { AddMemberDialog } from "@/components/household/AddMemberDialog";
 
 type HouseholdMember = {
   id: string;
@@ -24,6 +25,7 @@ type HouseholdMember = {
   relationship: string;
   primary_resident_id: string;
   avatar_url?: string;
+  invitation_status: 'pending' | 'sent' | 'accepted';
 };
 
 type UserProfile = {
@@ -39,6 +41,15 @@ type SupabaseUser = {
 
 };
 
+type MemberData = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string | null;
+  relationship: string;
+  invitation_status: 'pending' | 'sent' | 'accepted';
+};
+
 export default function ResidentDashboard() {
   const router = useRouter();
   const supabase = createClientComponentClient();
@@ -47,12 +58,6 @@ export default function ResidentDashboard() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
-  const [newMember, setNewMember] = useState({
-    name: "",
-    relationship: "",
-    email: "",
-    phone: ""
-  });
   const [editingMember, setEditingMember] = useState<HouseholdMember | null>(null);
   const [memberToDelete, setMemberToDelete] = useState<HouseholdMember | null>(null);
 
@@ -146,78 +151,6 @@ export default function ResidentDashboard() {
     return <LoadingScreen />
   }
 
-  const handleAddMember = async () => {
-    try {
-      const tempPassword = generateTempPassword();
-
-      const response = await fetch('/api/household-member', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: newMember.email,
-          tempPassword,
-          name: newMember.name,
-          origin: window.location.origin
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to create user account');
-      }
-
-      // Get current resident's data
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (!currentUser) throw new Error('User not authenticated');
-
-      let { data: residentData, error: residentError } = await supabase
-        .from('residents')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .single();
-
-      if (!residentData) {
-        const { data: newResident, error: createError } = await supabase
-          .from('residents')
-          .insert([{ user_id: currentUser.id }])
-          .select('id')
-          .single();
-
-        if (createError) throw createError;
-        residentData = newResident;
-      }
-
-      // Create household member record
-      const memberData = {
-        primary_resident_id: residentData.id,
-        user_id: currentUser.id,
-        first_name: newMember.name.split(' ')[0],
-        last_name: newMember.name.split(' ')[1] || '',
-        relationship: newMember.relationship,
-        email: newMember.email,
-        phone_number: newMember.phone || null
-      };
-
-      const { data: memberResult, error: memberError } = await supabase
-        .from('household_members')
-        .insert([memberData])
-        .select();
-
-      if (memberError) throw memberError;
-
-      if (memberResult && memberResult[0]) {
-        setHouseholdMembers(prev => [...prev, memberResult[0]]);
-        setNewMember({ name: "", relationship: "", email: "", phone: "" });
-        setIsAddMemberOpen(false);
-        toast.success('Household member added successfully. They will receive an email to set up their account.');
-      }
-
-    } catch (error: any) {
-      console.error('Error adding household member:', error);
-      toast.error(error.message || 'Failed to add household member');
-    }
-  };
-
   const handleEditMember = async () => {
     if (editingMember) {
       try {
@@ -305,6 +238,31 @@ export default function ResidentDashboard() {
 
     } catch (error) {
       console.error('Error deleting household member:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  };
+
+  const handleAddMember = async (memberData: MemberData) => {
+    try {
+      // First add the member to the database as you currently do
+
+      // Then send the invitation email
+      const { error } = await supabase.functions.invoke('send-invitation-email', {
+        body: {
+          email: memberData.email,
+          firstName: memberData.first_name,
+          lastName: memberData.last_name
+        }
+      });
+
+      if (error) {
+        toast.error('Failed to send invitation email');
+        return;
+      }
+
+      toast.success('Invitation email sent successfully');
+    } catch (error) {
+      console.error('Error sending invitation:', error);
+      toast.error('Failed to send invitation');
     }
   };
 
@@ -411,6 +369,23 @@ export default function ResidentDashboard() {
                     <CardContent>
                       <h3 className="font-semibold">{`${member.first_name} ${member.last_name}`}</h3>
                       <p className="text-sm text-gray-600">{member.relationship}</p>
+                      <div className="mt-2">
+                        {member.invitation_status === 'pending' && (
+                          <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full">
+                            Invitation Pending
+                          </span>
+                        )}
+                        {member.invitation_status === 'sent' && (
+                          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
+                            Invitation Sent
+                          </span>
+                        )}
+                        {member.invitation_status === 'accepted' && (
+                          <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
+                            Account Active
+                          </span>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -465,60 +440,14 @@ export default function ResidentDashboard() {
         </motion.div>
       </main >
 
-      <Dialog open={isAddMemberOpen} onOpenChange={setIsAddMemberOpen}>
-        <DialogContent className="bg-white">
-          <DialogHeader>
-            <DialogTitle>Add New Household Member</DialogTitle>
-            <DialogDescription className="text-gray-500">
-              Enter the details of the new household member. They will receive an email to set up their account.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                value={newMember.name}
-                onChange={(e) => setNewMember({ ...newMember, name: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={newMember.email}
-                onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input
-                id="phone"
-                type="tel"
-                value={newMember.phone}
-                onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="relationship">Relationship</Label>
-              <Input
-                id="relationship"
-                value={newMember.relationship}
-                onChange={(e) => setNewMember({ ...newMember, relationship: e.target.value })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={handleAddMember}
-              className="bg-[#832131] text-white hover:bg-[#6a1a28]"
-            >
-              Add Member
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AddMemberDialog
+        isOpen={isAddMemberOpen}
+        onClose={() => setIsAddMemberOpen(false)}
+        onMemberAdded={async (member) => {
+          await handleAddMember(member);
+          setHouseholdMembers(prev => [...prev, member as unknown as HouseholdMember]);
+        }}
+      />
 
       <Dialog open={!!editingMember} onOpenChange={() => setEditingMember(null)}>
         <DialogContent className="bg-white">
@@ -586,8 +515,4 @@ export default function ResidentDashboard() {
 
     </div >
   )
-}
-
-function generateTempPassword(): string {
-  return Math.random().toString(36).slice(-12);
 }

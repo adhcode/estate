@@ -172,3 +172,27 @@
 .slide-out-bottom {
   animation: slideOut 0.3s ease-out;
 }
+
+/* Add specific styles for auth pages */
+.auth-page {
+  @apply text-red-500;
+}
+
+/* Add specific styles for the homepage */
+.home-page {
+  @apply text-gray-900;
+}
+
+input,
+select {
+  font-size: 16px !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="password"] {
+  font-size: 16px !important;
+}

@@ -17,34 +17,55 @@ export default async function AdminLayout({
   const supabase = createServerComponentClient({ cookies })
 
   try {
-    // Check if user is authenticated
+    // 1. Check session
     const { data: { session }, error: authError } = await supabase.auth.getSession()
+    console.log('1. Session check:', {
+      hasSession: !!session,
+      userEmail: session?.user?.email,
+      authError
+    })
 
     if (authError || !session) {
+      console.log('No session in admin layout')
       redirect('/auth/login')
     }
 
-    // Verify admin role
+    // 2. Check staff table
     const { data: staffData, error: staffError } = await supabase
       .from('staff')
-      .select('role')
-      .eq('id', session.user.id)
+      .select('id, email, role')
+      .eq('email', session.user.email)
       .single()
 
-    if (staffError || staffData?.role !== 'admin') {
-      console.error('Staff role error or unauthorized access:', staffError)
-      redirect('/auth/login')
+    console.log('2. Staff check:', {
+      hasStaffData: !!staffData,
+      staffEmail: staffData?.email,
+      staffRole: staffData?.role,
+      staffError
+    })
+
+    // 3. Check admin access
+    const hasAdminAccess = staffData && staffData.role === 'admin'
+    console.log('3. Admin access check:', {
+      hasAdminAccess,
+      staffRole: staffData?.role
+    })
+
+    if (!hasAdminAccess) {
+      console.log('Admin access denied - redirecting to dashboard')
+      redirect('/resident/dashboard')
     }
 
+    console.log('4. Admin access granted - rendering layout')
     return (
       <div className={`${dmSans.className} bg-[#FBFBFB] min-h-screen`}>
         <AdminUI>
           {children}
         </AdminUI>
-      </div >
+      </div>
     )
   } catch (error) {
-    console.error('Unexpected error in AdminLayout:', error)
+    console.error('Admin layout error:', error)
     redirect('/auth/login')
   }
 }

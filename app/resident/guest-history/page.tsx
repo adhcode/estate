@@ -416,9 +416,21 @@ export default function GuestHistory() {
   useEffect(() => {
     const fetchGuests = async () => {
       try {
+        // Get current user
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+        if (userError) throw userError;
+
+        if (!user) {
+          console.error('No authenticated user found');
+          return;
+        }
+
+        // Fetch guests associated with this user
         const { data: guestsData, error: fetchError } = await supabase
           .from('guests')
           .select('*')
+          .eq('user_id', user.id)  // Assuming guests table has user_id column
           .order('created_at', { ascending: false });
 
         if (fetchError) throw fetchError;

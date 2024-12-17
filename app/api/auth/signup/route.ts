@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const { data: existingUser } = await supabase
       .from('users')
       .select('email')
-      .eq('email', body.email)
+      .eq('email', body.email) 
       .maybeSingle()
 
     if (existingUser) {
@@ -61,8 +61,8 @@ export async function POST(request: Request) {
       )
     }
 
-    // Create user profile
-    const { error: profileError } = await supabase
+    // Create user profile in users table
+    const { error: userProfileError } = await supabase
       .from('users')
       .insert([{
         id: user.id,
@@ -70,13 +70,36 @@ export async function POST(request: Request) {
         full_name: body.fullName,
         phone_number: body.phoneNumber,
         block_number: body.block,
-        flat_number: body.flatNumber
+        flat_number: body.flatNumber,
+        role: 'resident'
       }])
 
-    if (profileError) {
-      console.error('Profile creation error:', profileError)
+    if (userProfileError) {
+      console.error('User profile creation error:', userProfileError)
       return NextResponse.json(
-        { error: 'Failed to create user profile', details: profileError.message },
+        { error: 'Failed to create user profile', details: userProfileError.message },
+        { status: 500 }
+      )
+    }
+
+    // Create resident profile in residents table
+    const { error: residentProfileError } = await supabase
+      .from('residents')
+      .insert([{
+        user_id: user.id,
+        first_name: body.fullName.split(' ')[0],
+        last_name: body.fullName.split(' ').slice(1).join(' '),
+        email: body.email,
+        phone_number: body.phoneNumber,
+        block_number: body.block,
+        flat_number: body.flatNumber,
+        is_primary_resident: true
+      }])
+
+    if (residentProfileError) {
+      console.error('Resident profile creation error:', residentProfileError)
+      return NextResponse.json(
+        { error: 'Failed to create resident profile', details: residentProfileError.message },
         { status: 500 }
       )
     }
