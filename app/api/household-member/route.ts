@@ -19,53 +19,23 @@ export async function POST(request: Request) {
   
   try {
     const body = await request.json();
-    
-    if (!body.email || !body.tempPassword || !body.name || !body.origin) {
-      return NextResponse.json(
-        { error: 'Missing required fields' }, 
-        { status: 400 }
-      );
-    }
+    console.log('Processing invitation for:', body.email);
 
-    // First check if user exists
-    const { data: existingUser, error: listError } = await supabase.auth.admin
-      .listUsers();
-
-    if (listError) {
-      console.error('Error listing users:', listError);
-      throw listError;
-    }
-
-    const user = existingUser.users.find(u => u.email === body.email);
-
-    let userId;
-    if (user) {
-      // Use existing user
-      userId = user.id;
-      console.log('Using existing user:', userId);
-    } else {
-      // Create new user
-      console.log('Creating new user for:', body.email);
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: body.email,
-        password: body.tempPassword,
-        email_confirm: true,
-        user_metadata: {
-          full_name: body.name,
-          role: 'household_member'
-        }
-      });
-
-      if (authError) {
-        console.error('Error creating user:', authError);
-        throw authError;
+    // Create new user with a temporary password
+    const tempPassword = crypto.randomUUID().slice(0, 8);
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email: body.email,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: {
+        full_name: body.name,
+        role: 'household_member'
       }
-      userId = authData.user.id;
-      console.log('Created new user:', userId);
-    }
+    });
 
-    // Send password reset email
-    console.log('Sending password reset email to:', body.email);
+    if (authError) throw authError;
+
+    // Immediately send password reset email
     const { error: resetError } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email: body.email,
@@ -75,21 +45,17 @@ export async function POST(request: Request) {
     });
 
     if (resetError) {
-      console.error('Error generating reset link:', resetError);
+      console.error('Failed to send reset email:', resetError);
       throw resetError;
     }
 
-    console.log('Successfully processed request for:', body.email);
     return NextResponse.json({ 
-      user: { id: userId },
-      message: 'User processed successfully'
+      user: authData.user,
+      message: 'User created and reset email sent' 
     });
 
   } catch (error) {
     console.error('API Error:', error);
-    if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-    return NextResponse.json({ error: 'An unknown error occurred' }, { status: 400 });
+    return NextResponse.json({ error: 'Failed to process request' }, { status: 400 });
   }
 } 

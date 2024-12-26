@@ -45,9 +45,24 @@ export function HouseholdMembers() {
 
     useEffect(() => {
         const fetchData = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            setCurrentUser(user);
-            if (user) await fetchMembers();
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                setCurrentUser(user);
+
+                if (user) {
+                    const { data: members, error } = await supabase
+                        .from('household_members')
+                        .select('*')
+                        .eq('primary_resident_id', user.id)
+                        .order('created_at', { ascending: false });
+
+                    if (error) throw error;
+                    setHouseholdMembers(members || []);
+                }
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                toast.error('Failed to load household members');
+            }
         };
 
         fetchData();
@@ -129,26 +144,17 @@ export function HouseholdMembers() {
         }
 
         try {
-            // Get or create resident record
-            const { data: existingResident, error: residentError } = await supabase
-                .from('residents')
-                .select('id')
-                .eq('user_id', currentUser.id)
+            // First check if member already exists for this user
+            const { data: existingMember } = await supabase
+                .from('household_members')
+                .select('*')
+                .eq('email', memberData.email)
+                .eq('primary_resident_id', currentUser.id)
                 .single();
 
-            let residentId;
-            if (residentError || !existingResident) {
-                const { data: newResident, error: createError } = await supabase
-                    .from('residents')
-                    .insert([{ user_id: currentUser.id }])
-                    .select('id')
-                    .single();
-
-                if (createError) throw createError;
-                if (!newResident) throw new Error('Failed to create resident record');
-                residentId = newResident.id;
-            } else {
-                residentId = existingResident.id;
+            if (existingMember) {
+                toast.error('This member is already in your household');
+                return;
             }
 
             // Create household member
@@ -162,7 +168,7 @@ export function HouseholdMembers() {
                     relationship: memberData.relationship,
                     invitation_status: 'pending',
                     access_status: 'active',
-                    primary_resident_id: residentId
+                    primary_resident_id: currentUser.id
                 }])
                 .select('*')
                 .single();
@@ -176,24 +182,21 @@ export function HouseholdMembers() {
                 body: JSON.stringify({
                     email: memberData.email,
                     name: `${memberData.first_name} ${memberData.last_name}`,
-                    tempPassword: crypto.randomUUID().slice(0, 8),
                     origin: window.location.origin
                 }),
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to send invitation');
+                throw new Error('Failed to send invitation');
             }
 
-            // Refresh the members list
-            await fetchMembers();
+            // Update local state
+            setHouseholdMembers(prev => [newMember, ...prev]);
             toast.success('Member added and invitation sent successfully!');
 
         } catch (error: any) {
             console.error('Error adding member:', error);
             toast.error(error.message || 'Failed to add member');
-            throw error;
         }
     };
 
