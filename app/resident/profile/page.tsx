@@ -148,16 +148,23 @@ export default function ProfilePage() {
     }
 
     return (
-        <div className="min-h-screen bg-background">
-            <main className="container mx-auto px-4 py-12">
-                <Button
-                    variant="ghost"
-                    className="mb-6 -ml-4 text-gray-600 hover:text-gray-900 hover:bg-transparent"
-                    onClick={() => router.push('/resident/dashboard')}
+        <div className="min-h-screen bg-[#FCE8EB]">
+            <main className="container mx-auto px-4 py-8">
+                {/* Back Button */}
+                <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.5 }}
                 >
-                    <ChevronLeft className="h-5 w-5 mr-1" />
-                    Back to Dashboard
-                </Button>
+                    <Button
+                        variant="ghost"
+                        className="mb-8 group flex items-center text-[#832131] hover:text-[#832131]/80 hover:bg-white/50"
+                        onClick={() => router.push('/resident/dashboard')}
+                    >
+                        <ChevronLeft className="h-5 w-5 mr-2 transition-transform group-hover:-translate-x-1" />
+                        Back to Dashboard
+                    </Button>
+                </motion.div>
 
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -166,22 +173,25 @@ export default function ProfilePage() {
                 >
                     <div className="max-w-2xl mx-auto space-y-6">
                         {/* Profile Header Card */}
-                        <Card className="border-none shadow-sm">
-                            <CardContent className="pt-6">
-                                <div className="flex flex-col items-center">
+                        <Card className="border-none shadow-lg overflow-hidden">
+                            <div className="bg-[#832131] h-32 relative">
+                                <div className="absolute -bottom-16 w-full flex justify-center">
                                     <div className="relative">
-                                        <Avatar className="w-32 h-32 border-2 border-white">
+                                        <Avatar className="w-32 h-32 border-4 border-white shadow-lg">
                                             <AvatarImage
                                                 src={user.avatar_url || "/default-avatar.png"}
                                                 alt={user.full_name}
+                                                className="object-cover"
                                             />
-                                            <AvatarFallback className="bg-primary text-2xl">
+                                            <AvatarFallback className="bg-[#832131] text-white text-3xl">
                                                 {user.full_name ? user.full_name[0] : '?'}
                                             </AvatarFallback>
                                         </Avatar>
                                         <label htmlFor="avatar-upload"
-                                            className="absolute bottom-2 right-2 p-2 bg-white rounded-full shadow-sm cursor-pointer hover:bg-gray-50 transition-colors">
-                                            <Camera className="h-5 w-5 text-primary" />
+                                            className="absolute bottom-2 right-2 p-3 bg-white rounded-full shadow-md cursor-pointer 
+                                                     hover:bg-gray-50 transition-all duration-300 hover:shadow-lg
+                                                     active:scale-95">
+                                            <Camera className="h-5 w-5 text-[#832131]" />
                                             <input
                                                 id="avatar-upload"
                                                 type="file"
@@ -191,72 +201,55 @@ export default function ProfilePage() {
                                             />
                                         </label>
                                     </div>
-                                    {!user.avatar_url && (
-                                        <p className="mt-2 text-sm text-muted-foreground">
-                                            Upload profile picture
-                                        </p>
-                                    )}
-                                    <h2 className="mt-4 text-2xl font-bold">{user.full_name || 'Loading...'}</h2>
-                                    <p className="text-muted-foreground">Resident</p>
                                 </div>
+                            </div>
+                            <CardContent className="pt-20 pb-6 text-center">
+                                <h2 className="text-2xl font-bold text-gray-900">
+                                    {user.full_name || 'Loading...'}
+                                </h2>
                             </CardContent>
                         </Card>
 
                         {/* Profile Details Card */}
-                        <Card className="border-none shadow-sm">
-                            <CardHeader>
-                                <CardTitle className="text-xl font-semibold">Personal Information</CardTitle>
-                                <p className="text-sm text-muted-foreground">Contact support if you need to update your information</p>
+                        <Card className="border-none shadow-lg">
+                            <CardHeader className="border-b border-gray-100 bg-white">
+                                <CardTitle className="text-xl font-semibold text-[#832131]">
+                                    Personal Information
+                                </CardTitle>
+                                <p className="text-sm text-gray-500">
+                                    Contact support if you need to update your information
+                                </p>
                             </CardHeader>
-                            <CardContent className="space-y-6">
-                                <div className="space-y-1">
-                                    <Label className="text-sm font-medium text-gray-500">Full Name</Label>
-                                    <div className="flex items-center gap-2">
-                                        <User className="h-4 w-4 text-gray-400" />
-                                        <p className="text-base">{user.full_name || 'Not provided'}</p>
+                            <CardContent className="p-6 space-y-6">
+                                {[
+                                    { label: "Full Name", value: user.full_name, icon: User },
+                                    { label: "Email Address", value: user.email, icon: Mail },
+                                    { label: "Phone Number", value: user.phone_number, icon: Phone },
+                                    { label: "Block", value: user.block_number, icon: HomeIcon },
+                                    { label: "Flat", value: user.flat_number, icon: HomeIcon }
+                                ].map((item, index) => (
+                                    <div key={index} className="group p-4 rounded-lg hover:bg-gray-50 transition-colors duration-200">
+                                        <Label className="text-sm font-medium text-gray-500 mb-2 block">
+                                            {item.label}
+                                        </Label>
+                                        <div className="flex items-center gap-3">
+                                            <item.icon className="h-5 w-5 text-[#832131] group-hover:scale-110 transition-transform duration-200" />
+                                            <p className="text-base text-gray-900">
+                                                {item.value || 'Not provided'}
+                                            </p>
+                                        </div>
                                     </div>
-                                </div>
+                                ))}
 
-                                <div className="space-y-1">
-                                    <Label className="text-sm font-medium text-gray-500">Email Address</Label>
-                                    <div className="flex items-center gap-2">
-                                        <Mail className="h-4 w-4 text-gray-400" />
-                                        <p className="text-base">{user.email || 'Not provided'}</p>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-1">
-                                    <Label className="text-sm font-medium text-gray-500">Phone Number</Label>
-                                    <div className="flex items-center gap-2">
-                                        <Phone className="h-4 w-4 text-gray-400" />
-                                        <p className="text-base">{user.phone_number || 'Not provided'}</p>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-1">
-                                    <Label className="text-sm font-medium text-gray-500">Block</Label>
-                                    <div className="flex items-center gap-2">
-                                        <HomeIcon className="h-4 w-4 text-gray-400" />
-                                        <p className="text-base">{user.block_number || 'Not provided'}</p>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-1">
-                                    <Label className="text-sm font-medium text-gray-500">Flat</Label>
-                                    <div className="flex items-center gap-2">
-                                        <HomeIcon className="h-4 w-4 text-gray-400" />
-                                        <p className="text-base">{user.flat_number || 'Not provided'}</p>
-                                    </div>
-                                </div>
-
-                                <div className="pt-4 border-t">
+                                <div className="pt-6 border-t border-gray-100">
                                     <Button
                                         variant="ghost"
-                                        className="w-full flex items-center justify-center gap-2 text-destructive hover:bg-destructive/10"
+                                        className="w-full flex items-center justify-center gap-2 text-[#832131] 
+                                                 hover:bg-red-50 hover:text-[#832131] h-12 text-base"
                                         onClick={() => setShowLogoutConfirmation(true)}
                                     >
-                                        <LogOut size={20} />
-                                        <span>Logout</span>
+                                        <LogOut className="h-5 w-5" />
+                                        <span>Logout from Account</span>
                                     </Button>
                                 </div>
                             </CardContent>
@@ -265,25 +258,25 @@ export default function ProfilePage() {
                 </motion.div>
             </main>
 
-            {/* Updated Logout Dialog with Quicksand font */}
+            {/* Logout Dialog */}
             <Dialog open={showLogoutConfirmation} onOpenChange={setShowLogoutConfirmation}>
-                <DialogContent className={`w-[90%] max-w-[320px] rounded-xl bg-white p-6 shadow-lg ${quicksand.className}`}>
-                    <div className="flex flex-col items-center justify-center gap-2 pb-4">
-                        <div className="rounded-full bg-red-50 p-3">
-                            <LogOut className="h-6 w-6 text-[#832131]" />
+                <DialogContent className="w-[90%] max-w-[320px] rounded-xl bg-white p-6 shadow-xl">
+                    <div className="flex flex-col items-center justify-center gap-4 pb-4">
+                        <div className="rounded-full bg-red-50 p-4">
+                            <LogOut className="h-8 w-8 text-[#832131]" />
                         </div>
                         <DialogTitle className="text-xl font-bold text-gray-900">
-                            Logout Account
+                            Confirm Logout
                         </DialogTitle>
-                        <DialogDescription className="text-center text-sm text-gray-500">
-                            Are you sure you want to logout from your account? You will need to login again to access your account.
+                        <DialogDescription className="text-center text-sm text-gray-600">
+                            Are you sure you want to logout? You'll need to sign in again to access your account.
                         </DialogDescription>
                     </div>
 
-                    <DialogFooter className="flex flex-col gap-2 pt-4">
+                    <DialogFooter className="flex flex-col gap-3 pt-4">
                         <Button
                             type="button"
-                            className="w-full bg-[#832131] font-medium text-white hover:bg-[#832131]/90"
+                            className="w-full bg-[#832131] font-medium text-white hover:bg-[#832131]/90 h-11"
                             onClick={handleLogout}
                         >
                             Yes, Logout
@@ -292,7 +285,7 @@ export default function ProfilePage() {
                             type="button"
                             variant="outline"
                             onClick={() => setShowLogoutConfirmation(false)}
-                            className="w-full border-2 border-gray-200 font-medium hover:bg-gray-50"
+                            className="w-full border-2 border-gray-200 font-medium hover:bg-gray-50 h-11"
                         >
                             Cancel
                         </Button>

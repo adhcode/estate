@@ -8,13 +8,22 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, History, ArrowRight, Users, Trash, Edit, ShoppingBag, Camera } from "lucide-react";
+import { UserPlus, History, ArrowRight, Users, Trash, Edit, ShoppingBag, Camera, Bell, User, LogOut } from "lucide-react";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useRouter } from 'next/navigation';
 import { LoadingScreen } from "@/components/ui/loading-screen"
 import { toast } from "sonner";
 import { createClient } from '@supabase/supabase-js'
 import { AddMemberDialog } from "@/components/household/AddMemberDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Footer } from '@/app/resident/components/Footer'  // Adjust path as needed
+import { HouseholdMembers } from '@/app/resident/components/HouseholdMembers'
 
 type HouseholdMember = {
   id: string;
@@ -151,368 +160,154 @@ export default function ResidentDashboard() {
     return <LoadingScreen />
   }
 
-  const handleEditMember = async () => {
-    if (editingMember) {
-      try {
-        const { error } = await supabase
-          .from('household_members')
-          .update({
-            first_name: editingMember.first_name,
-            last_name: editingMember.last_name,
-            relationship: editingMember.relationship
-          })
-          .eq('id', editingMember.id);
-
-        if (error) throw error;
-
-        setHouseholdMembers(members =>
-          members.map(member =>
-            member.id === editingMember.id ? editingMember : member
-          )
-        );
-        setEditingMember(null);
-      } catch (error) {
-        console.error('Error updating household member:', error);
-        // Add error handling UI feedback here
-      }
-    }
-  };
-
-  const handleDeleteClick = (member: HouseholdMember) => {
-    setMemberToDelete(member);
-  };
-
-  const confirmDelete = async () => {
-    if (!memberToDelete) return;
-
-    try {
-      console.log('Attempting to delete member:', memberToDelete.id);
-
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-
-      const { data: residentData, error: residentError } = await supabase
-        .from('residents')
-        .select('id')
-        .eq('user_id', user?.id)
-        .single();
-
-      if (residentError) throw residentError;
-
-      console.log('Database deletion attempt with:', {
-        memberId: memberToDelete.id,
-        residentId: residentData.id,
-        userId: user?.id
-      });
-
-      const { error: deleteError } = await supabase
-        .from('household_members')
-        .delete()
-        .eq('id', memberToDelete.id)
-        .eq('primary_resident_id', residentData.id);
-
-      if (deleteError) {
-        console.error('Database deletion error:', deleteError);
-        throw deleteError;
-      }
-
-      const { data: checkData, error: checkError } = await supabase
-        .from('household_members')
-        .select('*')
-        .eq('id', memberToDelete.id);
-
-      if (checkError) throw checkError;
-
-      if (checkData && checkData.length > 0) {
-        console.error('Deletion failed - record still exists');
-        throw new Error('Failed to delete member');
-      }
-
-      console.log('Member successfully deleted');
-
-      setHouseholdMembers(prevMembers =>
-        prevMembers.filter(member => member.id !== memberToDelete.id)
-      );
-
-      setMemberToDelete(null);
-
-    } catch (error) {
-      console.error('Error deleting household member:', error instanceof Error ? error.message : 'Unknown error');
-    }
-  };
-
-  const handleAddMember = async (memberData: MemberData) => {
-    try {
-      // First add the member to the database as you currently do
-
-      // Then send the invitation email
-      const { error } = await supabase.functions.invoke('send-invitation-email', {
-        body: {
-          email: memberData.email,
-          firstName: memberData.first_name,
-          lastName: memberData.last_name
-        }
-      });
-
-      if (error) {
-        toast.error('Failed to send invitation email');
-        return;
-      }
-
-      toast.success('Invitation email sent successfully');
-    } catch (error) {
-      console.error('Error sending invitation:', error);
-      toast.error('Failed to send invitation');
-    }
-  };
-
   return (
-    <div className={`min-h-screen bg-[#FCE8EB] text-gray-800 font-montserrat transition-colors duration-300`}>
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
-        body {
-          font-family: 'Montserrat', sans-serif;
-        }
-      `}</style>
-
-      <div className="container mx-auto px-4 pt-8">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="text-center mb-8"
-        >
-          <h1 className="text-4xl font-bold text-[#832131] mb-2">
-            {getTimeBasedGreeting()}, {userProfile?.full_name ? getFirstName(userProfile.full_name) : ''}
-          </h1>
-
-        </motion.div>
+    <div className="flex-1 text-gray-800 font-montserrat">
+      {/* Hero Section with User Welcome */}
+      <div className="mb-8">
+        <div className="container mx-auto px-4 py-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="max-w-3xl mx-auto text-center"
+          >
+            <h1 className="text-2xl md:text-4xl font-bold text-[#832131]">
+              {getTimeBasedGreeting()}, {userProfile?.full_name ? getFirstName(userProfile.full_name) : ''}
+            </h1>
+          </motion.div>
+        </div>
       </div>
 
-      <main className="container mx-auto px-4 py-4">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="text-center mb-4"
-        >
-
-        </motion.div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+      <div className="container mx-auto px-4 mb-12">
+        {/* Primary Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
           {[
-            { title: "Register Guest", icon: UserPlus, desc: "Seamlessly add new visitors", color: "bg-[#832131]", href: "/resident/register-visitor" },
-            { title: "Guest History", icon: History, desc: "Review past visitor logs", color: "bg-[#832131]", href: "/resident/guest-history" },
-            { title: "Marketplace", icon: ShoppingBag, desc: "Explore community services", color: "bg-[#832131]", href: "/resident/marketplace" },
+            {
+              title: "Register New Visitor",
+              icon: UserPlus,
+              desc: "Quick and secure visitor registration process",
+              href: "/resident/register-visitor",
+            },
+            {
+              title: "Guest History",
+              icon: History,
+              desc: "View and manage your visitor records",
+              href: "/resident/guest-history",
+            }
           ].map((item, index) => (
             <motion.div
               key={item.title}
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
+              initial={{ opacity: 0, x: index === 0 ? -20 : 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5 }}
+              className="h-full"
             >
-              <Link href={item.href}>
-                <Card className="overflow-hidden group hover:shadow-xl transition-shadow duration-300 bg-white">
-                  <CardHeader className={`${item.color} text-white p-6 group-hover:scale-105 transition-transform duration-300`}>
-                    <item.icon className="h-12 w-12 mb-4" />
-                    <CardTitle className="text-2xl font-semibold">{item.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-6">
-                    <CardDescription className="text-gray-600 mb-4">{item.desc}</CardDescription>
-                    <Button className="w-full bg-[#832131] hover:bg-[#6a1a28] text-white" size="lg">
-                      Access {item.title}
-                    </Button>
-                  </CardContent>
-                </Card>
-              </Link >
-            </motion.div >
-          ))
-          }
-        </div >
-
-        <motion.div
-          initial={{ opacity: 0, y: 50 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-          className="mb-16"
-        >
-          <Card className="overflow-hidden bg-white">
-            <CardHeader className="bg-[#832131] text-white">
-              <CardTitle className="text-3xl font-bold flex items-center">
-                <Users className="mr-3 h-8 w-8" />
-                My Household
-              </CardTitle>
-              <CardDescription className="text-[#FCE8EB]">Manage your family members and their access</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {householdMembers.map((member) => (
-                  <Card key={member.id} className="bg-[#FCE8EB]">
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <Avatar className="h-12 w-12 border-2 border-[#832131]">
-                          <AvatarImage src={member.avatar_url || ''} />
-                          <AvatarFallback className="bg-[#832131] text-white">
-                            {member.first_name[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex space-x-2">
-                          <Button variant="ghost" size="icon" onClick={() => setEditingMember(member)}>
-                            <Edit className="h-4 w-4 text-[#832131]" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(member)}>
-                            <Trash className="h-4 w-4 text-[#832131]" />
-                          </Button>
+              <Link href={item.href} className="h-full block">
+                <Card
+                  className="group cursor-pointer active:shadow-lg hover:shadow-lg 
+                     transition-all duration-300 border-2 border-[#832131] h-full"
+                  style={{ touchAction: "manipulation" }}
+                >
+                  <CardHeader className="p-6 sm:p-8 h-full">
+                    <div className="flex flex-col h-full">
+                      <div className="flex items-start space-x-4 mb-4">
+                        <div
+                          className="bg-gray-100 p-4 rounded-full shrink-0 transition-colors duration-300
+                            group-hover:bg-[#832131] group-active:bg-[#832131]
+                            touch:group-active:bg-[#832131]"
+                        >
+                          <item.icon
+                            className="h-6 w-6 sm:h-8 sm:w-8 transition-colors duration-300
+                              text-[#832131] group-hover:text-white 
+                              group-active:text-white touch:group-active:text-white"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-xl sm:text-2xl font-bold text-[#832131] mb-2">
+                            {item.title}
+                          </CardTitle>
+                          <CardDescription className="text-sm sm:text-base">
+                            {item.desc}
+                          </CardDescription>
                         </div>
                       </div>
-                    </CardHeader>
-                    <CardContent>
-                      <h3 className="font-semibold">{`${member.first_name} ${member.last_name}`}</h3>
-                      <p className="text-sm text-gray-600">{member.relationship}</p>
-                      <div className="mt-2">
-                        {member.invitation_status === 'pending' && (
-                          <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full">
-                            Invitation Pending
-                          </span>
-                        )}
-                        {member.invitation_status === 'sent' && (
-                          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-                            Invitation Sent
-                          </span>
-                        )}
-                        {member.invitation_status === 'accepted' && (
-                          <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
-                            Account Active
-                          </span>
-                        )}
+                      <div className="mt-auto flex justify-end">
+                        <ArrowRight
+                          className="h-5 w-5 sm:h-6 sm:w-6 text-[#832131] transform transition-transform duration-300
+                            group-hover:translate-x-2 group-active:translate-x-2
+                            touch:group-active:translate-x-2"
+                        />
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                <Card className="flex items-center justify-center bg-[#FCE8EB]">
-                  <Button
-                    onClick={() => setIsAddMemberOpen(true)}
-                    className="bg-[#832131] hover:bg-[#6a1a28] text-white font-medium py-6"
-                    size="lg"
-                  >
-                    <UserPlus className="mr-2 h-5 w-5" />
-                    Add Member
-                  </Button>
+                    </div>
+                  </CardHeader>
                 </Card>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+              </Link>
+            </motion.div>
+          ))}
+        </div>
 
+        {/* Household Members Section */}
+        <HouseholdMembers />
+
+        {/* Estate Updates Section */}
         <motion.div
-          initial={{ opacity: 0, y: 50 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.5 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
         >
-          <Card className="bg-white">
-            <CardHeader className="bg-[#832131] text-white">
-              <CardTitle className="text-2xl font-semibold">Latest Community Updates</CardTitle>
+          <Card>
+            <CardHeader className="bg-[#832131] p-6">
+              <div className="flex items-center space-x-4">
+                <div className="bg-white/10 p-3 rounded-full">
+                  <Bell className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <CardTitle className="text-2xl text-white">Estate Updates</CardTitle>
+                  <CardDescription className="text-gray-200">
+                    Latest announcements and security updates
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-6">
-              <ul className="space-y-4">
+              <div className="space-y-6">
                 {[
-                  "New gym equipment arriving next week",
-                  "Pool maintenance scheduled for this weekend",
-                  "Community BBQ event on Saturday",
-                  "Updated parking regulations now in effect"
+                  {
+                    title: "New Security Protocol",
+                    desc: "Updated visitor registration process starts next week",
+                    date: "Today"
+                  },
+                  {
+                    title: "Visitor Parking Update",
+                    desc: "New designated areas for visitor parking",
+                    date: "Yesterday"
+                  },
+                  {
+                    title: "Guest Access Hours",
+                    desc: "Revised timing for visitor entry (6 AM - 10 PM)",
+                    date: "2 days ago"
+                  }
                 ].map((update, index) => (
-                  <li key={index} className="flex items-center">
-                    <span className="h-2 w-2 bg-[#832131] rounded-full mr-3"></span>
-                    <p className="text-gray-700">{update}</p>
-                  </li>
+                  <div key={index} className="flex items-start space-x-4 p-4 rounded-lg hover:bg-gray-50 transition-colors duration-200">
+                    <div className="h-2 w-2 bg-[#832131] rounded-full mt-2"></div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900 mb-1">{update.title}</h4>
+                      <p className="text-gray-600">{update.desc}</p>
+                      <p className="text-sm text-gray-400 mt-1">{update.date}</p>
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </CardContent>
-            <CardFooter>
-              <Link href="/resident/updates" className="w-full">
-                <Button className="w-full bg-[#832131] hover:bg-[#6a1a28] text-white">
-                  View All Updates
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
+            <CardFooter className="bg-gray-50 p-6">
+              <Button className="w-full bg-[#832131] hover:bg-[#6a1a28] text-white" size="lg">
+                View All Updates
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
             </CardFooter>
           </Card>
         </motion.div>
-      </main >
-
-      <AddMemberDialog
-        isOpen={isAddMemberOpen}
-        onClose={() => setIsAddMemberOpen(false)}
-        onMemberAdded={async (member) => {
-          await handleAddMember(member);
-          setHouseholdMembers(prev => [...prev, member as unknown as HouseholdMember]);
-        }}
-      />
-
-      <Dialog open={!!editingMember} onOpenChange={() => setEditingMember(null)}>
-        <DialogContent className="bg-white">
-          <DialogHeader>
-            <DialogTitle>Edit Household Member</DialogTitle>
-            <DialogDescription className="text-gray-500">Update the details of the household member.</DialogDescription>
-          </DialogHeader>
-          {editingMember && (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="edit-name">Name</Label>
-                <Input
-                  id="edit-name"
-                  value={`${editingMember.first_name} ${editingMember.last_name}`}
-                  onChange={(e) => {
-                    const [firstName, ...lastNameParts] = e.target.value.split(' ');
-                    setEditingMember({
-                      ...editingMember,
-                      first_name: firstName || '',
-                      last_name: lastNameParts.join(' ') || ''
-                    });
-                  }}
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-relationship">Relationship</Label>
-                <Input
-                  id="edit-relationship"
-                  value={editingMember.relationship}
-                  onChange={(e) => setEditingMember({ ...editingMember, relationship: e.target.value })}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button onClick={handleEditMember} className="bg-[#832131] text-white hover:bg-[#6a1a28]">Update Member</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!memberToDelete} onOpenChange={(open) => !open && setMemberToDelete(null)}>
-        <DialogContent className="bg-white">
-          <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {memberToDelete?.first_name} {memberToDelete?.last_name} from your household? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex space-x-2">
-            <Button
-              variant="outline"
-              onClick={() => setMemberToDelete(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmDelete}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              Delete Member
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-    </div >
+      </div>
+    </div>
   )
 }

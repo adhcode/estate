@@ -15,7 +15,7 @@
     "incremental": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
-    "types": ["node"],
+    "types": ["@types/node"],
     "plugins": [
       {
         "name": "next"
@@ -26,6 +26,6 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "next.config.js", "tailwind.config.js"],
   "exclude": ["node_modules"]
 }

@@ -12,6 +12,7 @@ import { Mail, Lock, Menu, Eye, EyeOff } from "lucide-react"
 import { quicksand } from '@/app/fonts'
 import { motion, AnimatePresence } from "framer-motion"
 import { LoadingScreen } from "@/components/ui/loading-screen"
+import { toast } from "react-hot-toast"
 
 export default function SignInPage() {
   const [email, setEmail] = useState("")
@@ -60,13 +61,27 @@ export default function SignInPage() {
     checkSession();
   }, [supabase, router]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('verified') === 'true') {
+      toast(
+        <div className="flex flex-col gap-1">
+          <p className="font-medium">Welcome!</p>
+          <p className="text-sm text-gray-500">Your account is now verified.</p>
+        </div>
+      )
+
+      // Clean up the URL
+      window.history.replaceState({}, '', '/auth/login')
+    }
+  }, [])
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError("");
 
     try {
-      // First try to sign in
       const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
@@ -78,21 +93,7 @@ export default function SignInPage() {
         throw new Error('Login failed - no user data returned');
       }
 
-      // Check if email is verified
-      if (!user.email_confirmed_at) {
-        setError('Please verify your email before logging in.');
-
-        // Store email for verification page
-        localStorage.setItem('pendingVerification', JSON.stringify({
-          email: email,
-          timestamp: new Date().toISOString()
-        }));
-
-        router.push('/auth/verify-email');
-        return;
-      }
-
-      // Proceed with role check and login
+      // Get user role
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('role')
@@ -101,26 +102,19 @@ export default function SignInPage() {
 
       if (userError) throw userError;
 
-      // Redirect based on role
-      switch (userData?.role) {
-        case 'resident':
-          router.push('/resident/dashboard');
-          break;
-        case 'admin':
-          router.push('/admin/dashboard');
-          break;
-        case 'superadmin':
-          router.push('/superadmin/dashboard');
-          break;
-        default:
-          setError('Invalid user role');
-          await supabase.auth.signOut();
-      }
+      // Determine redirect path
+      const redirectPath = userData?.role === 'admin'
+        ? '/admin/dashboard'
+        : userData?.role === 'superadmin'
+          ? '/superadmin/dashboard'
+          : '/resident/dashboard';
+
+      // Force a hard redirect
+      window.location.href = redirectPath;
 
     } catch (error: any) {
       console.error('Login error:', error);
       setError(error.message || 'An error occurred during login');
-    } finally {
       setIsLoading(false);
     }
   };
