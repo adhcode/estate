@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,21 +10,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { Textarea } from "@/components/ui/textarea"
 import { format } from "date-fns"
-import { Check, ChevronLeft, ChevronRight, Copy, CalendarIcon, Clock, User, Mail, Phone } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Copy, CalendarIcon, Clock, User, Mail, Phone, Share2, MessageSquare, Instagram, Twitter } from "lucide-react"
 import { cn } from "@/lib/utils"
 import PhoneInput from 'react-phone-input-2'
 import 'react-phone-input-2/lib/style.css'
 import { useRouter } from "next/navigation"
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { Loader } from "@/app/components/Loader"
+import { toast } from "sonner"
+import { useToast } from "@/components/ui/use-toast"
 
 export default function RegisterVisitor() {
-  const supabase = createClientComponentClient()
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
-
   const generateGuestId = () => {
     const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let result = 'VIS-';
@@ -34,11 +30,45 @@ export default function RegisterVisitor() {
     return result;
   }
 
+  const [pageLoading, setPageLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const supabase = createClientComponentClient()
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     fullName: "",
     purpose: "",
     guestId: generateGuestId()
   })
+  const router = useRouter()
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+          router.push('/login')
+          return
+        }
+      } catch (error) {
+        console.error('Error:', error)
+      } finally {
+        setPageLoading(false)
+      }
+    }
+
+    checkAuth()
+  }, [supabase, router])
+
+  useEffect(() => {
+    console.log('Page loading state:', pageLoading)
+    console.log('Submit loading state:', isSubmitting)
+  }, [pageLoading, isSubmitting])
+
+  if (pageLoading || isSubmitting) {
+    return <Loader />
+  }
 
   const handleCopyGuestId = () => {
     navigator.clipboard.writeText(formData.guestId);
@@ -48,60 +78,73 @@ export default function RegisterVisitor() {
 
   const handleSubmit = async () => {
     if (!formData.fullName || !formData.purpose) {
-      setError("Please fill in all fields")
-      return
+      setError("Please fill in all fields");
+      return;
     }
 
     try {
-      setIsSubmitting(true)
-      setError(null)
+      setIsSubmitting(true);
+      setError(null);
 
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      if (userError || !user) throw new Error('Authentication error')
+      // Get current user
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error('Authentication error');
 
-      const { data: userData, error: userDataError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single()
+      const userEmail = user.email?.toLowerCase();
+      console.log('Current auth user:', { id: user.id, email: userEmail });
 
-      if (userDataError) throw new Error('Failed to get user data')
+      // Try to get user data first (either as household member or primary resident)
+      const { data: userData, error: userError2 } = await supabase
+        .rpc('get_user_details', {
+          user_email: userEmail
+        });
 
-      const now = new Date()
-      const currentDate = now.toISOString().split('T')[0]
-      const currentTime = now.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      })
+      console.log('User details:', userData);
+
+      if (userError2 || !userData) {
+        console.error('Error getting user details:', userError2);
+        throw new Error('Failed to get user details');
+      }
 
       const guestData = {
         guest_id: formData.guestId,
-        user_id: user.id,
+        user_id: userData.primary_resident_id || userData.user_id,
+        registered_by: user.id,
+        registered_by_type: userData.is_household_member ? 'household_member' : 'primary_resident',
         full_name: formData.fullName,
-        visit_date: currentDate,
-        visit_time: currentTime,
+        visit_date: new Date().toISOString().split('T')[0],
+        visit_time: new Date().toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        }),
         purpose_of_visit: formData.purpose,
         status: 'pending',
         block_number: userData.block_number,
-        flat_number: userData.flat_number
-      }
+        flat_number: userData.flat_number,
+        created_at: new Date().toISOString()
+      };
+
+      console.log('Attempting to insert guest data:', guestData);
 
       const { error: visitorError } = await supabase
         .from('guests')
-        .insert([guestData])
+        .insert([guestData]);
 
-      if (visitorError) throw new Error('Failed to register visitor')
+      if (visitorError) {
+        console.error('Visitor insert error:', visitorError);
+        throw new Error('Failed to register visitor: ' + visitorError.message);
+      }
 
-      setShowSuccessModal(true)
+      setShowSuccessModal(true);
 
     } catch (error) {
-      console.error('Error:', error)
-      setError(error instanceof Error ? error.message : 'An unexpected error occurred')
+      console.error('Error:', error);
+      setError(error instanceof Error ? error.message : 'An unexpected error occurred');
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen font-quicksand text-gray-800">
@@ -186,14 +229,7 @@ export default function RegisterVisitor() {
                   style={{ background: '#832131' }}
                   className="w-full text-white hover:bg-[#832131]/90 disabled:opacity-50"
                 >
-                  {isSubmitting ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Registering...
-                    </div>
-                  ) : (
-                    "Register Visitor"
-                  )}
+                  {isSubmitting ? "Register Visitor" : "Register Visitor"}
                 </Button>
 
                 {error && (
@@ -220,7 +256,7 @@ export default function RegisterVisitor() {
                 Registration Successful
               </DialogTitle>
               <DialogDescription className="text-gray-600 font-quicksand">
-                Your visitor has been registered successfully. Please save the guest ID for reference.
+                Your visitor has been registered successfully. Please share the guest ID with the visitor.
               </DialogDescription>
             </DialogHeader>
 
@@ -230,21 +266,43 @@ export default function RegisterVisitor() {
                 <span className="text-sm text-gray-500 font-medium font-quicksand">Guest ID</span>
                 <div className="flex items-center justify-between bg-white p-3 rounded-md border border-gray-200">
                   <span className="font-semibold text-gray-800 font-quicksand">{formData.guestId}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleCopyGuestId}
-                    className="h-8 px-2 hover:bg-gray-100 font-quicksand"
-                  >
-                    {copied ? (
-                      <div className="flex items-center space-x-1 text-green-600">
-                        <Check className="w-4 h-4" />
-                        <span className="text-xs font-quicksand">Copied</span>
-                      </div>
-                    ) : (
-                      <Copy className="w-4 h-4 text-gray-600" />
-                    )}
-                  </Button>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          const text = `Welcome to LKJ estate, this is your access code ${formData.guestId}. Powered by UVISE\nhttps://uvise.com`;
+                          try {
+                            if (navigator.share) {
+                              await navigator.share({
+                                text: text,
+                                url: 'https://uvise.ng'
+                              });
+                            } else {
+                              navigator.clipboard.writeText(text);
+                              toast.success("Link copied to clipboard!");
+                            }
+                          } catch (error) {
+                            console.error('Error sharing:', error);
+                          }
+                        }}
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const text = `Welcome to LKJ estate, this is your access code ${formData.guestId}. Powered by UVISE\nhttps://uvise.ng`;
+                          navigator.clipboard.writeText(text);
+                          toast.success("Code copied to clipboard!");
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -277,6 +335,8 @@ export default function RegisterVisitor() {
                 </span>
               </div>
             </div>
+
+
 
             <DialogFooter className="w-full mt-8">
               <Button

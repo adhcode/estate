@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger, DrawerDescription } from "@/components/ui/drawer"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Loader } from "@/app/components/Loader"
 import {
   ChevronLeft,
   ArrowUpRight,
@@ -25,6 +26,7 @@ import {
 } from "lucide-react"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { Label } from "@/components/ui/label"
+import { toast } from "sonner"
 
 interface Guest {
   id: string
@@ -39,6 +41,8 @@ interface Guest {
   check_out_time?: string
   duration?: string
   status: 'pending' | 'active' | 'completed' | 'cancelled' | 'issue'
+  registered_by: string
+  created_at: string
 }
 
 function useMediaQuery(query: string): boolean {
@@ -172,7 +176,7 @@ export default function GuestHistory() {
   const isMobile = useMediaQuery("(max-width: 768px)")
   const supabase = createClientComponentClient()
   const [guests, setGuests] = useState<Guest[]>([])
-  const [loading, setLoading] = useState(true)
+  const [pageLoading, setPageLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false)
   const [guestToCancel, setGuestToCancel] = useState<Guest | null>(null)
@@ -180,23 +184,30 @@ export default function GuestHistory() {
   const [issueDescription, setIssueDescription] = useState("")
   const [selectedGuestForReport, setSelectedGuestForReport] = useState<Guest | null>(null)
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const itemsPerPage = 10
 
-  const totalPages = Math.ceil(guests.length / 10) || 1
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1)
-    }
-  }
-
-  const openGuestDetails = (guest: Guest) => {
-    setSelectedGuest(guest)
-  }
-
+  // Filter guests based on search term
   const filteredGuests = guests.filter(guest =>
     guest.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     guest.guest_id.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  // Calculate current guests for the page from filtered guests
+  const indexOfLastGuest = currentPage * itemsPerPage
+  const indexOfFirstGuest = indexOfLastGuest - itemsPerPage
+  const currentGuests = filteredGuests.slice(indexOfFirstGuest, indexOfLastGuest)
+  const totalPages = Math.ceil(filteredGuests.length / itemsPerPage)
+
+  // Reset to first page when search term changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm])
+
+  const openGuestDetails = (guest: Guest) => {
+    setSelectedGuest(guest)
+  }
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -295,7 +306,57 @@ export default function GuestHistory() {
   };
 
   const GuestDetailsContent = ({ guest }: { guest: Guest }) => {
+    const [registeredBy, setRegisteredBy] = useState<string>("");
     const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+    const supabase = createClientComponentClient();
+
+    useEffect(() => {
+      const fetchRegisteredBy = async () => {
+        try {
+          console.log("Fetching user for ID:", guest.registered_by);
+
+          // First try to fetch from users table
+          const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', guest.registered_by)
+            .single();
+
+          if (userError) {
+            console.error("Error fetching user:", userError);
+          }
+
+          if (userData) {
+            console.log("Found user:", userData);
+            setRegisteredBy(userData.full_name);
+          } else {
+            // If not found in users, try household_members table
+            const { data: householdData, error: householdError } = await supabase
+              .from('household_members')
+              .select('first_name, last_name')
+              .eq('id', guest.registered_by)
+              .single();
+
+            if (householdError) {
+              console.error("Error fetching household member:", householdError);
+            }
+
+            if (householdData) {
+              console.log("Found household member:", householdData);
+              // Combine first and last name
+              const fullName = `${householdData.first_name} ${householdData.last_name}`;
+              setRegisteredBy(fullName);
+            }
+          }
+        } catch (error) {
+          console.error("Error in fetchRegisteredBy:", error);
+        }
+      };
+
+      if (guest.registered_by) {
+        fetchRegisteredBy();
+      }
+    }, [guest.registered_by, supabase]);
 
     return (
       <motion.div
@@ -325,6 +386,13 @@ export default function GuestHistory() {
               )}
             </Button>
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-sm font-medium text-gray-500">Registered By</Label>
+          <p className="text-gray-900">
+            {registeredBy || "Loading..."}
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -413,51 +481,80 @@ export default function GuestHistory() {
     );
   };
 
-  useEffect(() => {
-    const fetchGuests = async () => {
-      try {
-        // Get current user
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+  const fetchGuestHistory = async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
 
-        if (userError) throw userError;
+      if (!user) {
+        router.push('/login');
+        return;
+      }
 
-        if (!user) {
-          console.error('No authenticated user found');
-          return;
-        }
+      const { data: userData } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single();
 
-        // Fetch guests associated with this user
-        const { data: guestsData, error: fetchError } = await supabase
+      if (userData && userData.role === 'resident') {
+        // Get primary resident's guests
+        const { data: primaryGuestsData } = await supabase
           .from('guests')
           .select('*')
-          .eq('user_id', user.id)  // Assuming guests table has user_id column
+          .eq('registered_by', user.id);
+
+        // Get household members
+        const { data: householdMembers } = await supabase
+          .from('household_members')
+          .select('*')
+          .eq('primary_resident_id', user.id);
+
+        let allGuests = primaryGuestsData || [];
+
+        if (householdMembers && householdMembers.length > 0) {
+          for (const member of householdMembers) {
+            const { data: memberGuests } = await supabase
+              .from('guests')
+              .select('*')
+              .eq('registered_by', member.id);
+
+            if (memberGuests) {
+              allGuests = [...allGuests, ...memberGuests];
+            }
+          }
+        }
+
+        // Sort guests by created_at date in descending order (latest first)
+        allGuests.sort((a, b) => {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+
+        setGuests(allGuests);
+      } else {
+        const { data: guestData } = await supabase
+          .from('guests')
+          .select('*')
+          .eq('registered_by', user.id)
           .order('created_at', { ascending: false });
 
-        if (fetchError) throw fetchError;
-
-        const formattedGuests: Guest[] = guestsData.map(guest => ({
-          ...guest,
-          status: guest.status
-        }));
-
-        setGuests(formattedGuests);
-      } catch (error) {
-        console.error('Error fetching guests:', error);
-      } finally {
-        setLoading(false);
+        setGuests(guestData || []);
       }
-    };
 
-    fetchGuests();
+    } catch (error) {
+      console.error('Error in fetchGuestHistory:', error);
+      toast.error('Failed to load guest history. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchGuestHistory();
   }, [supabase]);
 
   if (loading) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center gap-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">Powered by UVISE</p>
-      </div>
-    )
+    return <Loader />
   }
 
   return (
@@ -494,314 +591,143 @@ export default function GuestHistory() {
                   font-family: 'Quicksand', sans-serif !important;
                 }
               `}</style>
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={18} />
+                <Input
+                  type="text"
+                  placeholder="Search guests..."
+                  className="pl-10 pr-4 py-2 w-full"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
               {isMobile ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 }}
-                >
-                  <div className={`flex ${isMobile ? 'flex-col' : 'justify-between items-center'} mb-4`}>
-
-                    <h3 className={`${isMobile ? 'text-lg mb-2' : 'text-xl'} font-semibold text-foreground`}>Guest History</h3>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={18} />
-                      <Input
-                        type="text"
-                        placeholder="Search guests..."
-                        className="pl-10 pr-4 py-2 w-full font-quicksand"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  {isMobile ? (
-                    <div className="space-y-2">
-                      {filteredGuests.map((guest, index) => (
-                        <div key={index} className="flex justify-between items-center py-2 border-b">
-                          <div>
-                            <p className="font-medium font-quicksand">{guest.full_name}</p>
-                            <div className="flex items-center space-x-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm text-gray-500 font-quicksand">{guest.guest_id}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleCopyGuestId(guest.guest_id)}
-                                  className="h-8 px-2 hover:bg-gray-100 ml-2"
-                                >
-                                  {copiedId === guest.guest_id ? (
-                                    <div className="flex items-center space-x-1 text-green-600">
-                                      <Check className="h-4 w-4" />
-                                      <span className="text-xs font-quicksand">Copied</span>
-                                    </div>
-                                  ) : (
-                                    <Copy className="h-4 w-4 text-gray-600" />
-                                  )}
-                                </Button>
-                              </div>
-                              <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white font-quicksand`}>
-                                {guest.status}
-                              </Badge>
-                            </div>
-                          </div>
-                          <Drawer>
-                            <DrawerTrigger asChild>
-                              <Button variant="ghost" onClick={() => openGuestDetails(guest)}>
-                                <ArrowUpRight className="text-gray-400" size={20} />
-                              </Button>
-                            </DrawerTrigger>
-                            <DrawerContent className="w-[90%] max-w-[400px] mx-auto bg-white">
-                              <DrawerHeader className="text-center">
-                                <DrawerTitle className="font-quicksand">Guest Details</DrawerTitle>
-                                <DrawerDescription className="text-center text-muted-foreground font-quicksand">
-                                  View detailed information about your guest.
-                                </DrawerDescription>
-                              </DrawerHeader>
-                              <div className="p-4">
-                                <GuestDetailsContent guest={guest} />
-                              </div>
-                            </DrawerContent>
-                          </Drawer>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-lg shadow">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-muted/50">
-                            <TableHead className="text-muted-foreground font-normal">Guest Name</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">ID</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Check-in Time</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Check-out Time</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Date</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Duration</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Status</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredGuests.map((guest, index) => (
-                            <TableRow key={index} className="hover:bg-muted/50 transition-colors bg-transparent">
-                              <TableCell>{guest.full_name}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium">Guest ID: {guest.guest_id}</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleCopyGuestId(guest.guest_id)}
-                                    className="h-8 px-2 hover:bg-gray-100"
-                                  >
-                                    {copiedId === guest.guest_id ? (
-                                      <div className="flex items-center space-x-1 text-green-600">
-                                        <Check className="h-4 w-4" />
-                                        <span className="text-xs">Copied</span>
-                                      </div>
-                                    ) : (
-                                      <Copy className="h-4 w-4 text-gray-600" />
-                                    )}
-                                  </Button>
+                <div className="space-y-2">
+                  {currentGuests.map((guest, index) => (
+                    <div key={index} className="flex justify-between items-center py-2 border-b">
+                      <div>
+                        <p className="font-medium font-quicksand">{guest.full_name}</p>
+                        <div className="flex items-center space-x-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-gray-500 font-quicksand">{guest.guest_id}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCopyGuestId(guest.guest_id)}
+                              className="h-8 px-2 hover:bg-gray-100 ml-2"
+                            >
+                              {copiedId === guest.guest_id ? (
+                                <div className="flex items-center space-x-1 text-green-600">
+                                  <Check className="h-4 w-4" />
+                                  <span className="text-xs font-quicksand">Copied</span>
                                 </div>
-                              </TableCell>
-                              <TableCell>{formatTime(guest.check_in_time)}</TableCell>
-                              <TableCell>{formatTime(guest.check_out_time)}</TableCell>
-                              <TableCell>{new Date(guest.visit_date).toLocaleDateString()}</TableCell>
-                              <TableCell>{guest.duration || 'Not started'}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white`}>
-                                  {guest.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button variant="ghost" size="sm" onClick={() => openGuestDetails(guest)}>
-                                      View Details
-                                    </Button>
-                                  </DialogTrigger>
-                                  <DialogContent className="sm:max-w-[425px] bg-white">
-                                    <DialogHeader>
-                                      <DialogTitle className="text-center text-2xl font-bold text-foreground font-quicksand">
-                                        Guest Details
-                                      </DialogTitle>
-                                      <DialogDescription className="text-center text-muted-foreground font-quicksand">
-                                        View detailed information about your guest.
-                                      </DialogDescription>
-                                    </DialogHeader>
-                                    <GuestDetailsContent guest={guest} />
-                                  </DialogContent>
-                                </Dialog>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                              ) : (
+                                <Copy className="h-4 w-4 text-gray-600" />
+                              )}
+                            </Button>
+                          </div>
+                          <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white font-quicksand`}>
+                            {guest.status}
+                          </Badge>
+                        </div>
+                      </div>
+                      <Drawer>
+                        <DrawerTrigger asChild>
+                          <Button variant="ghost" onClick={() => openGuestDetails(guest)}>
+                            <ArrowUpRight className="text-gray-400" size={20} />
+                          </Button>
+                        </DrawerTrigger>
+                        <DrawerContent className="w-[90%] max-w-[400px] mx-auto bg-white">
+                          <DrawerHeader className="text-center">
+                            <DrawerTitle className="font-quicksand">Guest Details</DrawerTitle>
+                            <DrawerDescription className="text-center text-muted-foreground font-quicksand">
+                              View detailed information about your guest.
+                            </DrawerDescription>
+                          </DrawerHeader>
+                          <div className="p-4">
+                            <GuestDetailsContent guest={guest} />
+                          </div>
+                        </DrawerContent>
+                      </Drawer>
                     </div>
-                  )}
-                </motion.div>
+                  ))}
+                </div>
               ) : (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 }}
-                >
-                  <div className={`flex ${isMobile ? 'flex-col' : 'justify-between items-center'} mb-4`}>
-
-                    <h3 className={`${isMobile ? 'text-lg mb-2' : 'text-xl'} font-semibold text-foreground`}>Guest History</h3>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={18} />
-                      <Input
-                        type="text"
-                        placeholder="Search guests..."
-                        className="pl-10 pr-4 py-2 w-full"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  {isMobile ? (
-                    <div className="space-y-2">
-                      {filteredGuests.map((guest, index) => (
-                        <div key={index} className="flex justify-between items-center py-2 border-b">
-                          <div>
-                            <p className="font-medium font-quicksand">{guest.full_name}</p>
-                            <div className="flex items-center space-x-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm text-gray-500 font-quicksand">{guest.guest_id}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleCopyGuestId(guest.guest_id)}
-                                  className="h-8 px-2 hover:bg-gray-100 ml-2"
-                                >
-                                  {copiedId === guest.guest_id ? (
-                                    <div className="flex items-center space-x-1 text-green-600">
-                                      <Check className="h-4 w-4" />
-                                      <span className="text-xs font-quicksand">Copied</span>
-                                    </div>
-                                  ) : (
-                                    <Copy className="h-4 w-4 text-gray-600" />
-                                  )}
-                                </Button>
-                              </div>
-                              <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white font-quicksand`}>
-                                {guest.status}
-                              </Badge>
-                            </div>
-                          </div>
-                          <Drawer>
-                            <DrawerTrigger asChild>
-                              <Button variant="ghost" onClick={() => openGuestDetails(guest)}>
-                                <ArrowUpRight className="text-gray-400" size={20} />
-                              </Button>
-                            </DrawerTrigger>
-                            <DrawerContent className="w-[90%] max-w-[400px] mx-auto bg-white">
-                              <DrawerHeader className="text-center">
-                                <DrawerTitle className="font-quicksand">Guest Details</DrawerTitle>
-                                <DrawerDescription className="text-center text-muted-foreground font-quicksand">
-                                  View detailed information about your guest.
-                                </DrawerDescription>
-                              </DrawerHeader>
-                              <div className="p-4">
-                                <GuestDetailsContent guest={guest} />
-                              </div>
-                            </DrawerContent>
-                          </Drawer>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-lg shadow">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-muted/50">
-                            <TableHead className="text-muted-foreground font-normal">Guest Name</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">ID</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Check-in Time</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Check-out Time</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Date</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Duration</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Status</TableHead>
-                            <TableHead className="text-muted-foreground font-normal">Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredGuests.map((guest, index) => (
-                            <TableRow key={index} className="hover:bg-muted/50 transition-colors bg-transparent">
-                              <TableCell>{guest.full_name}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium">Guest ID: {guest.guest_id}</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleCopyGuestId(guest.guest_id)}
-                                    className="h-8 px-2 hover:bg-gray-100"
-                                  >
-                                    {copiedId === guest.guest_id ? (
-                                      <div className="flex items-center space-x-1 text-green-600">
-                                        <Check className="h-4 w-4" />
-                                        <span className="text-xs">Copied</span>
-                                      </div>
-                                    ) : (
-                                      <Copy className="h-4 w-4 text-gray-600" />
-                                    )}
-                                  </Button>
-                                </div>
-                              </TableCell>
-                              <TableCell>{formatTime(guest.check_in_time)}</TableCell>
-                              <TableCell>{formatTime(guest.check_out_time)}</TableCell>
-                              <TableCell>{new Date(guest.visit_date).toLocaleDateString()}</TableCell>
-                              <TableCell>{guest.duration || 'Not started'}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white`}>
-                                  {guest.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button variant="ghost" size="sm" onClick={() => openGuestDetails(guest)}>
-                                      View Details
-                                    </Button>
-                                  </DialogTrigger>
-                                  <DialogContent className="sm:max-w-[425px] bg-white">
-                                    <DialogHeader>
-                                      <DialogTitle className="text-center text-2xl font-bold text-foreground font-quicksand">
-                                        Guest Details
-                                      </DialogTitle>
-                                      <DialogDescription className="text-center text-muted-foreground font-quicksand">
-                                        View detailed information about your guest.
-                                      </DialogDescription>
-                                    </DialogHeader>
-                                    <GuestDetailsContent guest={guest} />
-                                  </DialogContent>
-                                </Dialog>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </motion.div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Guest ID</TableHead>
+                      <TableHead>Full Name</TableHead>
+                      <TableHead>Visit Date</TableHead>
+                      <TableHead>Visit Time</TableHead>
+                      <TableHead>Purpose of Visit</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {currentGuests.map((guest, index) => (
+                      <TableRow key={index}>
+                        <TableCell>{guest.guest_id}</TableCell>
+                        <TableCell>{guest.full_name}</TableCell>
+                        <TableCell>{new Date(guest.visit_date).toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })}</TableCell>
+                        <TableCell>{guest.visit_time}</TableCell>
+                        <TableCell>{guest.purpose_of_visit}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white`}>
+                            {guest.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openGuestDetails(guest)}
+                          >
+                            <ArrowUpRight className="text-gray-400" size={20} />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {filteredGuests.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground">
+                  No guests found matching your search.
+                </div>
+              )}
+              {filteredGuests.length > 0 && (
+                <CardFooter className="flex justify-between items-center mt-4 px-6 py-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentPage(prev => prev - 1)}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <p className="text-sm text-muted-foreground">
+                    Page {currentPage} of {totalPages}
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentPage(prev => prev + 1)}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </Button>
+                </CardFooter>
               )}
             </CardContent>
-            <CardFooter className={`flex justify-between items-center mt-4 px-6 py-4 ${isMobile ? 'bg-muted/50' : ''}`}>
-              <p className="text-sm text-muted-foreground">{currentPage}/{totalPages}</p>
-              <Button
-                onClick={handleNextPage}
-                disabled={currentPage === totalPages}
-                variant="ghost"
-                className="text-primary hover:text-primary-foreground hover:bg-primary/90"
-              >
-                Next
-              </Button>
-            </CardFooter>
           </Card>
         </motion.div>
       </main>
     </div>
   )
 }
+

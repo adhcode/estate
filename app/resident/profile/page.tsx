@@ -19,7 +19,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Quicksand } from 'next/font/google'
-import { LoadingScreen } from "@/components/ui/loading-screen"
+import { Loader } from "@/app/components/Loader"
 import { toast } from "react-hot-toast"
 
 const quicksand = Quicksand({
@@ -54,31 +54,61 @@ export default function ProfilePage() {
                     return
                 }
 
-                // Fetch user data
+                // First check if user is in users table
                 const { data: userData, error: userError } = await supabase
                     .from('users')
                     .select('*')
                     .eq('id', authUser.id)
                     .single()
 
-                console.log('User data:', userData)
-
-                if (userError) {
-                    console.error('Error fetching user:', userError.message)
-                    return
-                }
-
                 if (userData) {
-                    const userProfile = {
+                    // This is a primary resident
+                    setUser({
                         full_name: userData.full_name || '',
                         email: authUser.email || '',
                         phone_number: userData.phone_number || '',
                         block_number: userData.block_number || '',
                         flat_number: userData.flat_number || '',
                         avatar_url: userData.avatar_url
+                    })
+                } else {
+                    // If not in users table, check household_members
+                    const { data: householdData, error: householdError } = await supabase
+                        .from('household_members')
+                        .select('*')
+                        .eq('id', authUser.id)
+                        .single()
+
+                    console.log('Household member data:', householdData)
+
+                    if (householdError) {
+                        console.error('Error fetching household member:', householdError)
+                        return
                     }
-                    console.log('Setting user state:', userProfile)
-                    setUser(userProfile)
+
+                    if (householdData) {
+                        // Get primary resident's details
+                        const { data: primaryResidentData, error: primaryError } = await supabase
+                            .from('users')
+                            .select('block_number, flat_number')
+                            .eq('id', householdData.primary_resident_id)
+                            .single()
+
+                        console.log('Primary resident data:', primaryResidentData)
+
+                        if (primaryError) {
+                            console.error('Error fetching primary resident:', primaryError)
+                        }
+
+                        setUser({
+                            full_name: `${householdData.first_name} ${householdData.last_name}`,
+                            email: authUser.email || '',
+                            phone_number: householdData.phone_number || '',
+                            block_number: primaryResidentData?.block_number || '',
+                            flat_number: primaryResidentData?.flat_number || '',
+                            avatar_url: householdData.avatar_url
+                        })
+                    }
                 }
             } catch (error) {
                 console.error('Error:', error)
@@ -144,7 +174,7 @@ export default function ProfilePage() {
     }
 
     if (loading) {
-        return <LoadingScreen />
+        return <Loader />
     }
 
     return (
