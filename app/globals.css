@@ -196,3 +196,17 @@ input[type="tel"],
 input[type="password"] {
   font-size: 16px !important;
 }
+
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-fadeOut {
+  animation: fadeOut 1.5s ease-out forwards;
+}

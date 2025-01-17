@@ -47,35 +47,36 @@ export function Navbar({ name, avatar_url }: NavbarProps) {
         const fetchUserData = async () => {
             try {
                 const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    // First try users table
-                    const { data: userData, error: userError } = await supabase
-                        .from('users')
-                        .select('id, full_name, avatar_url, role')
-                        .filter('id', 'eq', user.id)
-                        .maybeSingle();
+                if (!user) return;
 
-                    if (userData) {
-                        setUserRole('primary');
-                        setFullName(userData.full_name);
-                        setUserData(userData);
-                    } else {
-                        // If not in users table, check household_members
-                        const { data: memberData, error: memberError } = await supabase
-                            .from('household_members')
-                            .select('id, first_name, last_name, avatar_url')
-                            .filter('id', 'eq', user.id)
-                            .maybeSingle();
+                // First try users table
+                const { data: userData, error: userError } = await supabase
+                    .from('users')
+                    .select('*')
+                    .eq('id', user.id)
+                    .single();
 
-                        if (memberData) {
-                            setUserRole('household_member');
-                            setFullName(`${memberData.first_name} ${memberData.last_name}`);
-                            setUserData({
-                                ...memberData,
-                                full_name: `${memberData.first_name} ${memberData.last_name}`
-                            });
-                        }
-                    }
+                if (userData) {
+                    setUserRole('resident');
+                    setFullName(userData.full_name);
+                    setUserData(userData);
+                    return;
+                }
+
+                // If not in users table, check household_members
+                const { data: memberData, error: memberError } = await supabase
+                    .from('household_members')
+                    .select('*')
+                    .eq('id', user.id)
+                    .single();
+
+                if (memberData) {
+                    setUserRole('household_member');
+                    setFullName(`${memberData.first_name} ${memberData.last_name}`);
+                    setUserData({
+                        ...memberData,
+                        full_name: `${memberData.first_name} ${memberData.last_name}`
+                    });
                 }
             } catch (error) {
                 console.error('Error fetching user data:', error);
@@ -129,6 +130,33 @@ export function Navbar({ name, avatar_url }: NavbarProps) {
                 <h1 className="text-2xl font-bold text-[#832131]">LKJ Estate</h1>
             </Link>
 
+            {/* Desktop Navigation */}
+            <nav className="hidden md:flex items-center space-x-6">
+                {navigation.map((item) => (
+                    <Link
+                        key={item.name}
+                        href={item.href}
+                        className={cn(
+                            "flex items-center gap-x-2 text-sm transition-colors duration-200",
+                            "hover:text-[#832131]",
+                            pathname === item.href ? "text-[#832131] font-medium" : "text-gray-600"
+                        )}
+                    >
+                        <item.icon className="h-4 w-4" />
+                        {item.name}
+                    </Link>
+                ))}
+                <Button
+                    variant="ghost"
+                    className="flex items-center gap-x-2 text-sm hover:text-[#832131] transition-colors duration-200"
+                    onClick={() => setShowLogoutConfirmation(true)}
+                >
+                    <LogOut className="h-4 w-4" />
+                    Sign out
+                </Button>
+            </nav>
+
+            {/* Mobile Navigation */}
             <Sheet open={isOpen} onOpenChange={setIsOpen}>
                 <SheetTrigger asChild>
                     <Button variant="ghost" size="icon" className="md:hidden">
@@ -164,7 +192,7 @@ export function Navbar({ name, avatar_url }: NavbarProps) {
                                 <div className="flex flex-col space-y-1.5 items-center">
                                     <p className="text-base font-semibold">{fullName}</p>
                                     <p className="text-sm text-muted-foreground">
-                                        {userRole === 'primary' ? 'Resident' : 'Household Member'}
+                                        {userRole === 'resident' ? 'Resident' : 'Household Member'}
                                     </p>
                                 </div>
                             </div>

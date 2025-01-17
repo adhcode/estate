@@ -39,7 +39,9 @@ export default function RegisterVisitor() {
   const [formData, setFormData] = useState({
     fullName: "",
     purpose: "",
-    guestId: generateGuestId()
+    guestId: generateGuestId(),
+    visitTime: new Date().toISOString(),
+    visitDate: new Date().toISOString().split('T')[0]
   })
   const router = useRouter()
 
@@ -78,69 +80,80 @@ export default function RegisterVisitor() {
 
   const handleSubmit = async () => {
     if (!formData.fullName || !formData.purpose) {
-      setError("Please fill in all fields");
+      toast.error('Please fill in all required fields');
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      setIsSubmitting(true);
-      setError(null);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user found');
 
-      // Get current user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) throw new Error('Authentication error');
+      // First check if user is a household member
+      const { data: memberData, error: memberError } = await supabase
+        .from('household_members')
+        .select('primary_resident_id')
+        .eq('id', user.id)
+        .single();
 
-      const userEmail = user.email?.toLowerCase();
-      console.log('Current auth user:', { id: user.id, email: userEmail });
+      if (memberError && memberError.code !== 'PGRST116') throw memberError;
 
-      // Try to get user data first (either as household member or primary resident)
-      const { data: userData, error: userError2 } = await supabase
-        .rpc('get_user_details', {
-          user_email: userEmail
-        });
+      // Get the correct user ID (either primary resident or current user)
+      const primaryUserId = memberData?.primary_resident_id || user.id;
 
-      console.log('User details:', userData);
+      // Get the primary resident's details
+      const { data: primaryResidentData, error: primaryResidentError } = await supabase
+        .from('users')
+        .select('block_number, flat_number')
+        .eq('id', primaryUserId)
+        .single();
 
-      if (userError2 || !userData) {
-        console.error('Error getting user details:', userError2);
-        throw new Error('Failed to get user details');
-      }
+      if (primaryResidentError) throw primaryResidentError;
+
+      // Generate guest ID
+      const guestId = `VIS-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+      // Format the visit time properly
+      const visitTime = new Date(formData.visitTime).toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
 
       const guestData = {
-        guest_id: formData.guestId,
-        user_id: userData.primary_resident_id || userData.user_id,
+        guest_id: guestId,
+        user_id: primaryUserId,
         registered_by: user.id,
-        registered_by_type: userData.is_household_member ? 'household_member' : 'primary_resident',
+        registered_by_type: memberData ? 'household_member' : 'primary_resident',
         full_name: formData.fullName,
-        visit_date: new Date().toISOString().split('T')[0],
-        visit_time: new Date().toLocaleTimeString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        }),
+        visit_date: formData.visitDate,
+        visit_time: visitTime,
         purpose_of_visit: formData.purpose,
         status: 'pending',
-        block_number: userData.block_number,
-        flat_number: userData.flat_number,
+        block_number: primaryResidentData.block_number,
+        flat_number: primaryResidentData.flat_number,
         created_at: new Date().toISOString()
       };
 
       console.log('Attempting to insert guest data:', guestData);
 
-      const { error: visitorError } = await supabase
+      const { error: insertError } = await supabase
         .from('guests')
         .insert([guestData]);
 
-      if (visitorError) {
-        console.error('Visitor insert error:', visitorError);
-        throw new Error('Failed to register visitor: ' + visitorError.message);
+      if (insertError) {
+        console.error('Insert error details:', insertError);
+        throw new Error(`Failed to register visitor: ${insertError.message}`);
       }
 
+      setFormData(prev => ({ ...prev, guestId }));
       setShowSuccessModal(true);
+      toast.success('Visitor registered successfully!');
 
-    } catch (error) {
-      console.error('Error:', error);
-      setError(error instanceof Error ? error.message : 'An unexpected error occurred');
+    } catch (error: any) {
+      console.error('Visitor insert error:', error);
+      setError(error.message);
+      toast.error(error.message);
     } finally {
       setIsSubmitting(false);
     }

@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { UserPlus } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import ProfileSetup from "@/app/components/ProfileSetup"
 
 function formatTime(date: Date) {
   return date.toLocaleTimeString('en-US', {
@@ -50,6 +51,7 @@ export default function DashboardPage() {
   const [firstName, setFirstName] = useState("")
   const supabase = createClientComponentClient()
   const router = useRouter()
+  const [needsProfileSetup, setNeedsProfileSetup] = useState(false)
 
   // Timer effect
   useEffect(() => {
@@ -64,63 +66,61 @@ export default function DashboardPage() {
   useEffect(() => {
     async function initializePage() {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        console.log('Current user:', user);
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        console.log('Auth User:', user);
+
+        if (authError) {
+          console.error('Auth Error:', authError);
+          throw authError;
+        }
 
         if (!user) {
-          router.push('/login');
+          router.push('/auth/login');
           return;
         }
 
-        // Try to get user data from users table with explicit filter
+        // Try to get user data from users table
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select(`
-            id,
-            role,
-            full_name,
-            avatar_url
-          `)
-          .filter('id', 'eq', user.id)
-          .maybeSingle();
+          .select('*')
+          .eq('email', user.email)
+          .single();
+
+        console.log('Users Query Result:', { userData, userError });
 
         if (userData) {
-          // Primary resident found
-          console.log('Primary resident data:', userData);
+          if (!userData.profile_completed) {
+            setNeedsProfileSetup(true);
+          }
           setUserRole(userData.role);
           setFirstName(userData.full_name.split(' ')[0]);
           setLoading(false);
           return;
         }
 
-        // If not found in users table, try household_members
+        // Try household_members table
         const { data: memberData, error: memberError } = await supabase
           .from('household_members')
-          .select(`
-            id,
-            first_name,
-            last_name,
-            avatar_url
-          `)
-          .filter('id', 'eq', user.id)
-          .maybeSingle();
+          .select('*')
+          .eq('email', user.email)
+          .single();
 
-        if (memberError) {
-          console.error('Error fetching household member:', memberError);
-          toast.error('Failed to load user data');
+        console.log('Household Members Query Result:', { memberData, memberError });
+
+        if (memberData) {
+          if (!memberData.profile_completed) {
+            setNeedsProfileSetup(true);
+          }
+          setUserRole('household_member');
+          setFirstName(memberData.first_name);
+          setLoading(false);
           return;
         }
 
-        if (memberData) {
-          console.log('Household member data:', memberData);
-          setUserRole('household_member');
-          setFirstName(memberData.first_name);
-        } else {
-          // Handle case where user is not found in either table
-          console.error('User not found in any table');
-          toast.error('User profile not found');
-          router.push('/login');
-        }
+        // If we get here, the user wasn't found in either table
+        console.error('User not found in any table. Email:', user.email);
+        toast.error('User profile not found. Please contact support.');
+        router.push('/auth/login');
 
       } catch (error) {
         console.error('Error in initializePage:', error);
@@ -139,6 +139,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-white font-quicksand">
+      {needsProfileSetup && <ProfileSetup />}
       {/* Hero Section - Restored original design */}
       <motion.section
         className="relative pt-8 pb-16 px-4 bg-gradient-to-b from-[#8B0000]/5 to-white"
@@ -271,12 +272,7 @@ export default function DashboardPage() {
                 description: "Community gatherings",
                 href: "/resident/events",
               },
-              {
-                icon: Coffee,
-                title: "Social Hub",
-                description: "Connect with neighbors",
-                href: "/resident/social",
-              },
+
               {
                 icon: Ticket,
                 title: "Amenities",
@@ -287,7 +283,7 @@ export default function DashboardPage() {
                 icon: MessageSquare,
                 title: "Forums",
                 description: "Join discussions",
-                href: "/resident/forums",
+                href: "/resident/forum",
               }
             ].map((feature, index) => (
               <motion.div key={index} variants={item}>

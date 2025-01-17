@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { Building, Users, Shield, ArrowRight, Menu } from "lucide-react"
+import { Building, Users, Shield, ArrowRight, Menu, MessageSquare, Bell, FileText } from "lucide-react"
 import Link from "next/link"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 
@@ -16,7 +16,7 @@ export default function HomePage() {
         }
       `}</style>
 
-      {/* Header */}
+      {/* Header with fixed navigation */}
       <header className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md z-50">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <motion.div
@@ -24,18 +24,23 @@ export default function HomePage() {
             animate={{ opacity: 1, x: 0 }}
             className="text-2xl md:text-3xl font-bold text-[#8B0000]"
           >
-            LKJ Estate
+            LKJ Gardens Connect
           </motion.div>
 
-          {/* Desktop Navigation - Hidden on mobile */}
-          <div className="hidden md:flex gap-4">
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center space-x-6">
             <Link href="/auth/login">
-              <Button variant="outline" className="text-[#8B0000] border-[#8B0000]">
+              <Button
+                variant="ghost"
+                className="text-[#8B0000] hover:bg-[#8B0000]/10"
+              >
                 Login
               </Button>
             </Link>
             <Link href="/auth/signup">
-              <Button className="bg-[#8B0000] text-white hover:bg-[#6B0000]">
+              <Button
+                className="bg-[#8B0000] text-white hover:bg-[#6B0000] shadow-lg hover:shadow-xl transition-all"
+              >
                 Sign up
               </Button>
             </Link>
@@ -74,7 +79,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Hero Section */}
+      {/* Updated Hero Section */}
       <motion.section
         className="pt-32 pb-16 px-4"
         initial={{ opacity: 0, y: 20 }}
@@ -84,42 +89,57 @@ export default function HomePage() {
         <div className="container mx-auto text-center">
           <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
             Welcome to{" "}
-            <span className="text-[#8B0000]">LKJ Estate</span>
+            <span className="text-[#8B0000]">LKJ Gardens Connect</span>
           </h1>
           <p className="text-xl md:text-2xl text-gray-600 mb-12 max-w-3xl mx-auto">
-            Experience seamless visitor management and enhanced security with our digital estate solution
+            Your all-in-one platform for estate living, community engagement, and service management
           </p>
-          <Link href="/auth/login">
+          <Link href="/auth/signup">
             <Button
               size="lg"
               className="bg-[#8B0000] text-white hover:bg-[#6B0000] text-lg px-8 h-12"
             >
-              Get Started
+              Join Our Community
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
           </Link>
         </div>
       </motion.section>
 
-      {/* Features Section */}
+      {/* Updated Features Section */}
       <section className="py-16 px-4 bg-gray-50">
         <div className="container mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               {
+                icon: Building,
+                title: "Residence Management",
+                description: "Manage your flat details, access estate information, and stay updated with community announcements"
+              },
+              {
                 icon: Users,
                 title: "Visitor Management",
-                description: "Pre-register your visitors and receive real-time notifications when they arrive"
+                description: "Pre-register visitors, generate access codes, and track visitor history for enhanced security"
               },
               {
                 icon: Shield,
-                title: "Enhanced Security",
-                description: "Digital verification system ensuring controlled access to the estate"
+                title: "Security & Access Control",
+                description: "Secure authentication, visitor verification, and real-time security notifications"
               },
               {
-                icon: Building,
-                title: "Estate Safety",
-                description: "Keep track of all visitors and maintain a secure environment"
+                icon: MessageSquare,
+                title: "Community Forum",
+                description: "Engage with fellow residents, share updates, and participate in community discussions"
+              },
+              {
+                icon: Bell,
+                title: "Notifications & Updates",
+                description: "Receive important announcements, maintenance schedules, and community event notifications"
+              },
+              {
+                icon: FileText,
+                title: "Service Requests",
+                description: "Submit and track maintenance requests, report issues, and access estate services"
               }
             ].map((feature, index) => (
               <motion.div
@@ -140,7 +160,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* Updated CTA Section */}
       <section className="py-16 px-4">
         <div className="container mx-auto">
           <motion.div
@@ -150,27 +170,27 @@ export default function HomePage() {
             transition={{ delay: 0.6 }}
           >
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Ready to Get Started?
+              Connect with Your Community
             </h2>
             <p className="text-lg md:text-xl mb-8 text-white/90">
-              Join our community and experience modern estate living
+              Join LKJ Gardens Connect to access all estate services and stay connected with your community
             </p>
             <div className="flex flex-col md:flex-row gap-4 justify-center">
-              <Link href="/auth/login">
+              <Link href="/auth/signup">
                 <Button
                   size="lg"
                   variant="secondary"
                   className="w-full md:w-auto text-[#8B0000] hover:text-[#8B0000] bg-white hover:bg-white/90"
                 >
-                  Login to Your Account
+                  Register Now
                 </Button>
               </Link>
-              <Link href="/auth/signup">
+              <Link href="/auth/login">
                 <Button
                   size="lg"
                   className="w-full md:w-auto bg-transparent hover:bg-white/10 border-2 border-white"
                 >
-                  Create New Account
+                  Resident Login
                 </Button>
               </Link>
             </div>
@@ -178,24 +198,26 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Footer */}
+      {/* Updated Footer */}
       <footer className="bg-gray-900 text-white py-12">
         <div className="container mx-auto px-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="space-y-4">
-              <div className="text-2xl font-bold">LKJ Estate</div>
+              <div className="text-2xl font-bold">LKJ Gardens Connect</div>
               <p className="text-gray-400">
-                Modern living with smart security solutions
+                Connecting residents, enhancing community living
               </p>
             </div>
 
             <div>
-              <h3 className="text-lg font-semibold mb-4">Features</h3>
+              <h3 className="text-lg font-semibold mb-4">Platform Features</h3>
               <ul className="space-y-2 text-gray-400">
-                <li>Visitor Pre-registration</li>
-                <li>Real-time Notifications</li>
-                <li>Access Control</li>
-                <li>Security Monitoring</li>
+                <li>Resident Portal</li>
+                <li>Visitor Management</li>
+                <li>Community Forum</li>
+                <li>Service Requests</li>
+                <li>Payment Integration</li>
+                <li>Event Management</li>
               </ul>
             </div>
 
@@ -203,34 +225,15 @@ export default function HomePage() {
               <h3 className="text-lg font-semibold mb-4">Quick Links</h3>
               <ul className="space-y-2">
                 <li>
+                  <Link href="/auth/signup" className="text-gray-400 hover:text-[#8B0000] transition-colors">
+                    Register
+                  </Link>
+                </li>
+                <li>
                   <Link href="/auth/login" className="text-gray-400 hover:text-[#8B0000] transition-colors">
                     Login
                   </Link>
                 </li>
-                <li>
-                  <Link href="/auth/signup" className="text-gray-400 hover:text-[#8B0000] transition-colors">
-                    Sign up
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/privacy-policy" className="text-gray-400 hover:text-[#8B0000] transition-colors">
-                    Privacy Policy
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/terms-of-service" className="text-gray-400 hover:text-[#8B0000] transition-colors">
-                    Terms of Service
-                  </Link>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="text-lg font-semibold mb-4">Contact</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>Email: reach@uvise.ng</li>
-                <li>Phone: +234 XXX XXX XXXX</li>
-                <li>Lagos, Nigeria</li>
               </ul>
             </div>
           </div>

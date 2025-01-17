@@ -32,10 +32,12 @@ interface HouseholdMember {
     phone_number: string | null;
     relationship: string;
     invitation_status: 'pending' | 'sent' | 'accepted';
-    access_status: 'active' | 'restricted';
+    access_status: 'active' | 'suspended';
     created_at: string;
-    primary_resident_id?: string;
-    avatar_url?: string;
+    primary_resident_id: string;
+    avatar_url: string | null;
+    role: 'member';
+    profile_completed: boolean;
 }
 
 interface MemberData {
@@ -50,7 +52,7 @@ interface MemberData {
 interface ApiResponse {
     user: {
         id: string;
-        primary_resident_id?: string;
+        primary_resident_id: string;
     };
     message: string;
     emailId: string;
@@ -72,28 +74,71 @@ export function HouseholdMembers() {
     // Add loading state for initial fetch
     const [isInitialLoading, setIsInitialLoading] = useState(true);
 
+    const [isResident, setIsResident] = useState(false);
+
+    // Simplified check - if they're in users table, they're a resident
+    useEffect(() => {
+        const checkIfResident = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                    console.log('No session found');
+                    return;
+                }
+
+                // Check if user exists in the users table
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('id', session.user.id)
+                    .single();
+
+                if (error) {
+                    console.error('Error checking user:', error);
+                    return;
+                }
+
+                // If user exists in users table, they are a resident
+                setIsResident(!!data);
+
+                // Log for debugging
+                console.log('User exists in users table:', !!data);
+            } catch (error) {
+                console.error('Error in checkIfResident:', error);
+            }
+        };
+
+        checkIfResident();
+    }, [supabase]);
+
+    // Simplified fetchMembers - only get members linked to this resident
     const fetchMembers = async () => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
-            if (!session) return;
+            if (!session) {
+                console.log('No session found');
+                return;
+            }
 
-            console.log('Fetching members for user:', session.user.id); // Debug log
+            // Log for debugging
+            console.log('Current user ID:', session.user.id);
 
             const { data: members, error } = await supabase
                 .from('household_members')
                 .select('*')
-                .eq('primary_resident_id', session.user.id)
-                .order('created_at', { ascending: false });
+                .eq('primary_resident_id', session.user.id);
 
             if (error) {
-                console.error('Supabase query error:', error); // Debug log
+                console.error('Error fetching members:', error);
                 throw error;
             }
 
-            console.log('Fetched members:', members); // Debug log
+            // Log for debugging
+            console.log('Fetched members for user', session.user.id, ':', members);
+
             setMembers(members || []);
         } catch (error) {
-            console.error('Error fetching members:', error);
+            console.error('Error:', error);
             toast.error('Failed to load household members');
         } finally {
             setIsInitialLoading(false);
@@ -121,44 +166,27 @@ export function HouseholdMembers() {
         setIsLoading(true);
 
         try {
-            // Validate form data
-            if (!formData.first_name || !formData.last_name || !formData.email || !formData.relationship) {
-                throw new Error('Please fill in all required fields');
-            }
-
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) throw new Error('No authenticated session');
-
-            const tempPassword = generateTempPassword();
-
-            const requestData = {
-                ...formData,
-                tempPassword,
-                origin: window.location.origin,
-                primary_resident_id: session.user.id
-            };
-
-            console.log('Sending request with data:', {
-                ...requestData,
-                tempPassword: '[REDACTED]'
-            });
-
             const response = await fetch('/api/household-member', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(requestData)
+                body: JSON.stringify(formData)
             });
 
-            const data = await response.json();
-
             if (!response.ok) {
-                console.error('Server response:', data);
-                throw new Error(data.error || 'Failed to add member');
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to add member');
             }
 
-            // Create new member object with correct types
+            const data: ApiResponse = await response.json();
+
+            // Check if primary_resident_id exists
+            if (!data.user.primary_resident_id) {
+                throw new Error('Primary resident ID is missing');
+            }
+
+            // Add the new member to the local state with all required fields
             const newMember: HouseholdMember = {
                 id: data.user.id,
                 first_name: formData.first_name,
@@ -169,7 +197,10 @@ export function HouseholdMembers() {
                 invitation_status: 'pending',
                 access_status: 'active',
                 created_at: new Date().toISOString(),
-                primary_resident_id: session.user.id
+                primary_resident_id: data.user.primary_resident_id, // Now guaranteed to be string
+                avatar_url: null,
+                role: 'member',
+                profile_completed: false
             };
 
             setMembers(prevMembers => [newMember, ...prevMembers]);
@@ -208,6 +239,12 @@ export function HouseholdMembers() {
         }
     };
 
+    // Add this useEffect to log the current state for debugging
+    useEffect(() => {
+        console.log('Current isResident state:', isResident);
+        console.log('Current members state:', members);
+    }, [isResident, members]);
+
     return (
         <div className="space-y-8">
             <div className="flex justify-between items-center border-b border-gray-200 pb-5">
@@ -219,140 +256,142 @@ export function HouseholdMembers() {
                         Manage your household members and their access
                     </p>
                 </div>
-                <Dialog open={isOpen} onOpenChange={setIsOpen}>
-                    <DialogTrigger asChild>
-                        <Button
-                            className="bg-[#832131] hover:bg-[#832131]/90 text-white"
-                            size="default"
-                        >
-                            <UserPlusIcon className="w-4 h-4 mr-2" />
-                            Add Member
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-[425px]">
-                        <DialogHeader>
-                            <DialogTitle className="text-xl font-semibold text-[#832131]">
-                                Add Household Member
-                            </DialogTitle>
-                            <DialogDescription className="text-gray-600">
-                                Fill in the details below to invite a new household member.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <form onSubmit={handleSubmit} className="space-y-6 py-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="first_name" className="text-sm font-medium text-gray-700">
-                                        First Name*
-                                    </Label>
-                                    <Input
-                                        id="first_name"
-                                        placeholder="John"
-                                        className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
-                                        value={formData.first_name}
-                                        onChange={(e) => setFormData(prev => ({
-                                            ...prev,
-                                            first_name: e.target.value
-                                        }))}
-                                        required
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="last_name" className="text-sm font-medium text-gray-700">
-                                        Last Name*
-                                    </Label>
-                                    <Input
-                                        id="last_name"
-                                        placeholder="Doe"
-                                        className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
-                                        value={formData.last_name}
-                                        onChange={(e) => setFormData(prev => ({
-                                            ...prev,
-                                            last_name: e.target.value
-                                        }))}
-                                        required
-                                    />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-                                    Email Address*
-                                </Label>
-                                <Input
-                                    id="email"
-                                    type="email"
-                                    placeholder="john.doe@example.com"
-                                    className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
-                                    value={formData.email}
-                                    onChange={(e) => setFormData(prev => ({
-                                        ...prev,
-                                        email: e.target.value
-                                    }))}
-                                    required
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="phone" className="text-sm font-medium text-gray-700">
-                                    Phone Number
-                                </Label>
-                                <Input
-                                    id="phone"
-                                    type="tel"
-                                    placeholder="+1 (555) 000-0000"
-                                    className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
-                                    value={formData.phone_number}
-                                    onChange={(e) => setFormData(prev => ({
-                                        ...prev,
-                                        phone_number: e.target.value
-                                    }))}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="relationship" className="text-sm font-medium text-gray-700">
-                                    Relationship*
-                                </Label>
-                                <Select
-                                    value={formData.relationship}
-                                    onValueChange={(value) => setFormData(prev => ({
-                                        ...prev,
-                                        relationship: value
-                                    }))}
-                                    required
-                                >
-                                    <SelectTrigger className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10">
-                                        <SelectValue placeholder="Select relationship" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="spouse">Spouse</SelectItem>
-                                        <SelectItem value="child">Child</SelectItem>
-                                        <SelectItem value="parent">Parent</SelectItem>
-                                        <SelectItem value="sibling">Sibling</SelectItem>
-                                        <SelectItem value="other">Other</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                {isResident && (
+                    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+                        <DialogTrigger asChild>
                             <Button
-                                type="submit"
-                                className="w-full bg-[#832131] hover:bg-[#832131]/90 text-white"
-                                disabled={isLoading}
+                                className="bg-[#832131] hover:bg-[#832131]/90 text-white"
+                                size="default"
                             >
-                                {isLoading ? (
-                                    <>
-                                        <svg className="animate-spin -ml-1 mr-3 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Adding Member...
-                                    </>
-                                ) : (
-                                    <>
-                                        <PlusIcon className="w-4 h-4 mr-2" />
-                                        Add Member
-                                    </>
-                                )}
+                                <UserPlusIcon className="w-4 h-4 mr-2" />
+                                Add Member
                             </Button>
-                        </form>
-                    </DialogContent>
-                </Dialog>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[425px]">
+                            <DialogHeader>
+                                <DialogTitle className="text-xl font-semibold text-[#832131]">
+                                    Add Household Member
+                                </DialogTitle>
+                                <DialogDescription className="text-gray-600">
+                                    Fill in the details below to invite a new household member.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <form onSubmit={handleSubmit} className="space-y-6 py-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="first_name" className="text-sm font-medium text-gray-700">
+                                            First Name*
+                                        </Label>
+                                        <Input
+                                            id="first_name"
+                                            placeholder="John"
+                                            className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
+                                            value={formData.first_name}
+                                            onChange={(e) => setFormData(prev => ({
+                                                ...prev,
+                                                first_name: e.target.value
+                                            }))}
+                                            required
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="last_name" className="text-sm font-medium text-gray-700">
+                                            Last Name*
+                                        </Label>
+                                        <Input
+                                            id="last_name"
+                                            placeholder="Doe"
+                                            className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
+                                            value={formData.last_name}
+                                            onChange={(e) => setFormData(prev => ({
+                                                ...prev,
+                                                last_name: e.target.value
+                                            }))}
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                                        Email Address*
+                                    </Label>
+                                    <Input
+                                        id="email"
+                                        type="email"
+                                        placeholder="john.doe@example.com"
+                                        className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData(prev => ({
+                                            ...prev,
+                                            email: e.target.value
+                                        }))}
+                                        required
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="phone" className="text-sm font-medium text-gray-700">
+                                        Phone Number
+                                    </Label>
+                                    <Input
+                                        id="phone"
+                                        type="tel"
+                                        placeholder="+1 (555) 000-0000"
+                                        className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10"
+                                        value={formData.phone_number}
+                                        onChange={(e) => setFormData(prev => ({
+                                            ...prev,
+                                            phone_number: e.target.value
+                                        }))}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="relationship" className="text-sm font-medium text-gray-700">
+                                        Relationship*
+                                    </Label>
+                                    <Select
+                                        value={formData.relationship}
+                                        onValueChange={(value) => setFormData(prev => ({
+                                            ...prev,
+                                            relationship: value
+                                        }))}
+                                        required
+                                    >
+                                        <SelectTrigger className="border-gray-200 focus:border-[#832131] focus:ring-[#832131]/10">
+                                            <SelectValue placeholder="Select relationship" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="spouse">Spouse</SelectItem>
+                                            <SelectItem value="child">Child</SelectItem>
+                                            <SelectItem value="parent">Parent</SelectItem>
+                                            <SelectItem value="sibling">Sibling</SelectItem>
+                                            <SelectItem value="other">Other</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <Button
+                                    type="submit"
+                                    className="w-full bg-[#832131] hover:bg-[#832131]/90 text-white"
+                                    disabled={isLoading}
+                                >
+                                    {isLoading ? (
+                                        <>
+                                            <svg className="animate-spin -ml-1 mr-3 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Adding Member...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <PlusIcon className="w-4 h-4 mr-2" />
+                                            Add Member
+                                        </>
+                                    )}
+                                </Button>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                )}
             </div>
 
             <div className="grid gap-4">

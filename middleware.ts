@@ -10,6 +10,11 @@ export async function middleware(req: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession()
 
+  // Add cache control headers to prevent back/forward cache
+  res.headers.set('Cache-Control', 'no-store, max-age=0')
+  res.headers.set('Pragma', 'no-cache')
+  res.headers.set('Expires', '0')
+
   // Debug the session
   console.log('Middleware Session:', {
     path: req.nextUrl.pathname,

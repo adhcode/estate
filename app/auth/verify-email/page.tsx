@@ -3,66 +3,58 @@
 import { useEffect, useState } from 'react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { Button } from "@/components/ui/button"
-import { Mail } from "lucide-react"
+import { Mail, Loader2, ArrowLeft } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { quicksand } from '@/app/fonts'
+import { motion } from 'framer-motion'
 
 export default function VerifyEmailPage() {
     const [email, setEmail] = useState<string | null>(null)
     const [isResending, setIsResending] = useState(false)
     const [isVerified, setIsVerified] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
+    const [countdown, setCountdown] = useState(0)
     const supabase = createClientComponentClient()
     const router = useRouter()
 
     useEffect(() => {
-        const checkVerificationStatus = async () => {
+        if (countdown > 0) {
+            const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
+            return () => clearTimeout(timer)
+        }
+    }, [countdown])
+
+    useEffect(() => {
+        const checkVerification = async () => {
             try {
-                // Get email from localStorage if available
+                // Get email from localStorage
                 const pendingSignup = localStorage.getItem('pendingSignup')
                 if (pendingSignup) {
                     const { email } = JSON.parse(pendingSignup)
-                    if (email) setEmail(email)
-                }
+                    setEmail(email)
 
-                // Check current session
-                const { data: { session } } = await supabase.auth.getSession()
-                if (session?.user?.email) {
-                    setEmail(session.user.email)
-                    if (session.user.email_confirmed_at) {
+                    // Check if user is already verified
+                    const { data: { user }, error } = await supabase.auth.getUser()
+                    if (user?.email_confirmed_at) {
+                        // User is verified, they will be redirected by callback.tsx
                         setIsVerified(true)
-                        await handleVerificationSuccess(session.user)
                     }
+                } else {
+                    // No pending signup, redirect to signup
+                    router.push('/auth/signup')
                 }
             } catch (error) {
-                console.error('Error checking verification:', error)
+                console.error('Verification check error:', error)
+                toast.error('Failed to check verification status')
             } finally {
                 setIsLoading(false)
             }
         }
 
-        checkVerificationStatus()
-
-        // Listen for auth state changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (session?.user?.email) {
-                setEmail(session.user.email)
-            }
-
-            if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-                if (session?.user?.email_confirmed_at) {
-                    setIsVerified(true)
-                    await handleVerificationSuccess(session.user)
-                }
-            }
-        })
-
-        return () => {
-            subscription.unsubscribe()
-        }
-    }, [supabase, router])
+        checkVerification()
+    }, [router, supabase.auth])
 
     const handleVerificationSuccess = async (user: any) => {
         if (!user?.email) return
@@ -102,7 +94,7 @@ export default function VerifyEmailPage() {
     }
 
     const handleResendEmail = async () => {
-        if (!email || isResending) return
+        if (!email || isResending || countdown > 0) return
 
         setIsResending(true)
         try {
@@ -116,6 +108,7 @@ export default function VerifyEmailPage() {
 
             if (error) throw error
             toast.success('Verification email resent successfully!')
+            setCountdown(60)
         } catch (error: any) {
             console.error('Error:', error)
             toast.error('Failed to resend verification email')
@@ -124,25 +117,41 @@ export default function VerifyEmailPage() {
         }
     }
 
-    // Show loading state
+    // Loading state with animation
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#8B0000] border-t-transparent" />
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex flex-col items-center space-y-4"
+                >
+                    <Loader2 className="h-8 w-8 animate-spin text-[#8B0000]" />
+                    <p className="text-gray-500">Checking verification status...</p>
+                </motion.div>
             </div>
         )
     }
 
-    // Show verified state
+    // Verified state with animation
     if (isVerified) {
         return (
-            <div className={`min-h-screen bg-white flex flex-col items-center justify-center p-4 ${quicksand.className}`}>
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`min-h-screen bg-white flex flex-col items-center justify-center p-4 ${quicksand.className}`}
+            >
                 <div className="max-w-md w-full space-y-8 text-center">
-                    <div className="flex justify-center">
+                    <motion.div
+                        className="flex justify-center"
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ delay: 0.2 }}
+                    >
                         <div className="rounded-full bg-green-100 p-4">
                             <Mail className="h-12 w-12 text-green-600" />
                         </div>
-                    </div>
+                    </motion.div>
 
                     <h2 className="mt-6 text-3xl font-bold text-gray-900">
                         Email Verified!
@@ -159,19 +168,28 @@ export default function VerifyEmailPage() {
                         Continue to Login
                     </Button>
                 </div>
-            </div>
+            </motion.div>
         )
     }
 
-    // Show verification pending state
+    // Verification pending state with animation
     return (
-        <div className={`min-h-screen bg-white flex flex-col items-center justify-center p-4 ${quicksand.className}`}>
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`min-h-screen bg-white flex flex-col items-center justify-center p-4 ${quicksand.className}`}
+        >
             <div className="max-w-md w-full space-y-8 text-center">
-                <div className="flex justify-center">
+                <motion.div
+                    className="flex justify-center"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: 0.2 }}
+                >
                     <div className="rounded-full bg-[#8B0000]/10 p-4">
                         <Mail className="h-12 w-12 text-[#8B0000]" />
                     </div>
-                </div>
+                </motion.div>
 
                 <h2 className="mt-6 text-3xl font-bold text-gray-900">
                     Verify your email
@@ -190,37 +208,42 @@ export default function VerifyEmailPage() {
 
                     <Button
                         onClick={handleResendEmail}
-                        disabled={isResending}
+                        disabled={isResending || countdown > 0}
                         className="w-full bg-[#8B0000] text-white hover:bg-[#660000] transition-colors disabled:bg-gray-400"
                     >
-                        {isResending ? 'Resending...' : 'Resend verification email'}
+                        {isResending ? (
+                            <span className="flex items-center">
+                                <Loader2 className="animate-spin mr-2" />
+                                Resending...
+                            </span>
+                        ) : countdown > 0 ? (
+                            `Resend available in ${countdown}s`
+                        ) : (
+                            'Resend verification email'
+                        )}
                     </Button>
 
-                    <div className="text-sm">
-                        <Link
-                            href="/auth/login"
-                            className="font-medium text-[#8B0000] hover:text-[#660000]"
-                            onClick={() => {
-                                // Optionally clear the session when returning to login
-                                supabase.auth.signOut();
-                            }}
-                        >
-                            Return to login
-                        </Link>
+                    <Link
+                        href="/auth/login"
+                        className="inline-flex items-center text-sm font-medium text-[#8B0000] hover:text-[#660000]"
+                        onClick={() => supabase.auth.signOut()}
+                    >
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Return to login
+                    </Link>
+
+                    <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+                        <h3 className="text-sm font-medium text-gray-900">
+                            What happens next?
+                        </h3>
+                        <ul className="mt-4 text-sm text-gray-500 list-disc list-inside space-y-2">
+                            <li>Click the verification link in your email</li>
+                            <li>You'll be redirected back to the site</li>
+                            <li>Your email will be verified and you can start using your account</li>
+                        </ul>
                     </div>
                 </div>
-
-                <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-                    <h3 className="text-sm font-medium text-gray-900">
-                        What happens next?
-                    </h3>
-                    <ul className="mt-4 text-sm text-gray-500 list-disc list-inside space-y-2">
-                        <li>Click the verification link in your email</li>
-                        <li>You'll be redirected back to the site</li>
-                        <li>Your email will be verified and you can start using your account</li>
-                    </ul>
-                </div>
             </div>
-        </div>
+        </motion.div>
     )
 } 

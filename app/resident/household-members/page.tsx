@@ -27,6 +27,8 @@ import {
 import { cn } from "@/lib/utils"
 import { type HouseholdMember } from "@/types/household"
 
+export const dynamic = 'force-dynamic'
+
 function useMediaQuery(query: string): boolean {
     const [matches, setMatches] = useState(false)
 
@@ -54,26 +56,44 @@ export default function HouseholdMembers() {
     const supabase = createClientComponentClient()
 
     const fetchHouseholdMembers = async () => {
-        console.log('Starting fetchHouseholdMembers')
+        console.log('Fetching members...');
+        setIsLoadingMembers(true);
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('No user found');
+
+            // First check if the current user is a household member
+            const { data: memberData, error: memberError } = await supabase
+                .from('household_members')
+                .select('primary_resident_id')
+                .eq('id', user.id)
+                .single();
+
+            if (memberError && memberError.code !== 'PGRST116') throw memberError;
+
+            // If user is a household member, use their primary_resident_id
+            // If not, use their own ID as they are the primary resident
+            const primaryResidentId = memberData?.primary_resident_id || user.id;
+
             const { data: members, error } = await supabase
                 .from('household_members')
                 .select('*')
-                .order('created_at', { ascending: false })
+                .eq('primary_resident_id', primaryResidentId)
+                .order('created_at', { ascending: false });
 
-            if (error) throw error
-            console.log('Successfully fetched members:', members)
-            setMembers(members || [])
+            if (error) throw error;
+
+            console.log('Fetched members:', members);
+            setMembers(members || []);
         } catch (error) {
-            console.error('Error fetching members:', error)
-            toast.error('Failed to fetch household members')
+            console.error('Error fetching members:', error);
+            toast.error('Failed to fetch household members');
         } finally {
-            setIsLoadingMembers(false)
+            setIsLoadingMembers(false);
         }
-    }
+    };
 
     const checkUserRole = async () => {
-        console.log('Starting checkUserRole')
         try {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) {
@@ -81,16 +101,17 @@ export default function HouseholdMembers() {
                 return
             }
 
-            const { data: userData, error: userError } = await supabase
+            const { data: userData, error } = await supabase
                 .from('users')
-                .select('role')
+                .select('id')
                 .eq('id', user.id)
                 .single()
 
-            if (userData?.role === 'resident') {
-                console.log('Setting user role to resident')
+            if (userData) {
+                console.log('User found in users table - setting as resident')
                 setCurrentUserRole('resident')
             } else {
+                console.log('User not found in users table - setting as member')
                 setCurrentUserRole('member')
             }
         } catch (error) {
@@ -132,8 +153,27 @@ export default function HouseholdMembers() {
     }
 
     const handleMemberAdded = async () => {
-        await fetchHouseholdMembers()
-        setShowAddDialog(false)
+        console.log('Starting handleMemberAdded')
+        try {
+            setIsLoadingMembers(true)  // Show loading state
+            const { data: members, error } = await supabase
+                .from('household_members')
+                .select('*')
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+
+            console.log('Previous members count:', members?.length)
+            console.log('New members list:', members)
+            setMembers(members || [])
+            setShowAddDialog(false)
+            toast.success('Member added successfully')
+        } catch (error) {
+            console.error('Error refreshing members:', error)
+            toast.error('Failed to refresh member list')
+        } finally {
+            setIsLoadingMembers(false)
+        }
     }
 
     const handleRevokeAccess = () => {
@@ -170,6 +210,11 @@ export default function HouseholdMembers() {
             setSelectedMember(updatedMember)
         }
     }
+
+    // Add this useEffect to log when members state changes
+    useEffect(() => {
+        console.log('Members state updated:', members)
+    }, [members])
 
     if (isLoadingRole || isLoadingMembers) {
         return (

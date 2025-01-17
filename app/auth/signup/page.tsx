@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
 import debounce from "lodash/debounce"
 import { LoadingScreen } from "@/components/ui/loading-screen"
+import { cn } from "@/lib/utils"
+import { Loader } from "@/app/components/Loader"
 
 const PHONE_REGEX = /^(\+234|0)[789][01]\d{8}$/
 const UNIQUE_CONSTRAINT_ERROR = 'Flat is already occupied by another resident'
@@ -252,74 +254,50 @@ export default function SignUpPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isLoading) return;
-
     setIsLoading(true);
-    setError("");
+    setError('');
 
     try {
-      // First create the user in Supabase
-      const { data, error: signUpError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
-          emailRedirectTo: 'https://lkjgardensigando.com/auth/callback',
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             full_name: formData.fullName,
             phone_number: formData.phoneNumber,
             block_number: formData.block,
             flat_number: formData.flatNumber,
-            role: 'resident'
           }
         }
-      });
+      })
 
-      if (signUpError) throw signUpError;
+      if (authError) throw authError;
 
-      if (!data.user) {
-        throw new Error('Signup failed - no user data returned');
+      if (authData.user) {
+        const { error: dbError } = await supabase
+          .from('users')
+          .insert([
+            {
+              id: authData.user.id,
+              email: formData.email,
+              full_name: formData.fullName,
+              phone_number: formData.phoneNumber,
+              block_number: formData.block,
+              flat_number: formData.flatNumber
+            }
+          ])
+
+        if (dbError) throw dbError;
+
+        toast.success('Please check your email for verification link');
+        router.push('/auth/verify-email');
+        return;
       }
-
-      // Send custom welcome email using Resend
-      const response = await fetch('/api/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          to: formData.email,
-          subject: 'Welcome to LKJ Gardens Igando',
-          html: `
-                    <h1>Welcome to LKJ Gardens Igando</h1>
-                    <p>Thank you for signing up! You will receive a separate email to verify your account.</p>
-                    <p>Please check your inbox and click the verification link to complete your registration.</p>
-                    <br />
-                    <p>Best regards,</p>
-                    <p>LKJ Gardens Igando Team</p>
-                `
-        }),
-      });
-
-      if (!response.ok) {
-        console.error('Failed to send welcome email');
-      }
-
-      localStorage.setItem('pendingSignup', JSON.stringify({
-        email: formData.email,
-        fullName: formData.fullName,
-        phoneNumber: formData.phoneNumber,
-        block: formData.block,
-        flatNumber: formData.flatNumber,
-        timestamp: new Date().toISOString()
-      }));
-
-      toast.success('Account created! Please check your email for verification.');
-      router.push('/auth/verify-email');
 
     } catch (error: any) {
       console.error('Signup error:', error);
-      setError(error.message);
-      toast.error('Signup failed');
+      toast.error(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -353,340 +331,348 @@ export default function SignUpPage() {
   }, [debouncedCheckEmail]);
 
   if (isLoading) {
-    return <LoadingScreen />
+    return <Loader />
   }
 
   return (
-    <div className={`font-sans flex min-h-screen flex-col bg-white ${quicksand.className}`}>
-      <header className="flex justify-between items-center px-4 py-3 bg-white">
-        <Link href="/" className="text-2xl md:text-3xl font-bold text-[#8B0000]">LKJ Estate</Link>
-        <div className="hidden md:flex space-x-4">
-          <Link href="/auth/login">
-            <Button variant="outline" className="text-[#8B0000] border-[#8B0000]">Login</Button>
-          </Link>
-          <Link href="/auth/signup">
-            <Button className="bg-[#8B0000] text-white">Sign up</Button>
-          </Link>
-        </div>
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="md:hidden">
-              <Menu className="h-6 w-6 text-[#8B0000]" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent
-            side="top"
-            className={`w-full py-4 px-4 ${quicksand.className} font-sans`}
+    <div className={`font-sans min-h-screen bg-gradient-to-b from-white to-[#F5F5F5] ${quicksand.className}`}>
+      <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+        <nav className="container flex h-16 max-w-screen-2xl items-center justify-between px-4">
+          <Link
+            href="/"
+            className="flex items-center transition-transform hover:scale-105"
           >
-            <div className="flex flex-col items-center justify-center space-y-3 mt-2">
-              <Link href="/auth/login">
-                <Button
-                  variant="outline"
-                  className="w-[200px] justify-center h-9 text-[#8B0000] border-[#8B0000]"
-                >
-                  Login
-                </Button>
-              </Link>
-              <Link href="/auth/signup">
-                <Button
-                  className="w-[200px] justify-center h-9 bg-[#8B0000] text-white hover:bg-[#6B0000]"
-                >
-                  Sign up
-                </Button>
-              </Link>
-            </div>
-          </SheetContent>
-        </Sheet>
-      </header>
+            <span className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-[#8B0000] to-[#6B0000] bg-clip-text text-transparent">
+              LKJ Gardens Connect
+            </span>
+          </Link>
 
-      <main className="flex-grow flex flex-col items-center justify-center px-4 py-8">
-        <div className="w-full max-w-md flex flex-col items-center justify-center space-y-6">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-900">
-              Sign up as a Resident!
-            </h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Sign up your resident account to register your guest
-            </p>
+          <div className="hidden md:flex items-center space-x-6">
+            <Link href="/auth/login">
+              <Button
+                variant="ghost"
+                className="text-[#8B0000] hover:bg-[#8B0000]/10"
+              >
+                Login
+              </Button>
+            </Link>
+            <Link href="/auth/signup">
+              <Button
+                className="bg-[#8B0000] text-white hover:bg-[#6B0000] shadow-lg hover:shadow-xl transition-all"
+              >
+                Sign up
+              </Button>
+            </Link>
           </div>
 
-          <form onSubmit={handleSubmit} className="w-full flex flex-col items-center space-y-4">
-            {error && (
-              <div className="text-red-500 text-center text-sm w-[350px]">{error}</div>
-            )}
-            {successMessage && (
-              <div className="text-green-500 text-center text-sm w-[350px]">{successMessage}</div>
-            )}
+          <div className="md:hidden">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden"
+                >
+                  <Menu className="h-5 w-5 text-[#8B0000]" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent
+                side="right"
+                className="bg-white w-[280px] p-6"
+              >
+                <div className="flex flex-col space-y-6">
+                  <Link href="/auth/login">
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start text-[#8B0000]"
+                    >
+                      Login
+                    </Button>
+                  </Link>
+                  <Link href="/auth/signup">
+                    <Button
+                      className="w-full justify-start bg-[#8B0000] text-white"
+                    >
+                      Sign up
+                    </Button>
+                  </Link>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
+        </nav>
+      </header>
 
-            {/* Personal Information */}
-            <div className="w-[350px] mb-2">
-              <h3 className="text-lg font-semibold text-gray-700">Personal Information</h3>
+      <main className="container max-w-screen-2xl mx-auto px-4 py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="max-w-md mx-auto"
+        >
+          <div className="bg-white rounded-xl shadow-xl p-8 space-y-8">
+            <div className="space-y-2 text-center">
+              <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-[#8B0000] to-[#6B0000] bg-clip-text text-transparent">
+                Create an Account
+              </h1>
+              <p className="text-gray-500">
+                Join our community and enjoy exclusive resident benefits
+              </p>
             </div>
-            {/* Name, Email, Phone fields */}
 
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <Input
-                  name="fullName"
-                  type="text"
-                  placeholder="Full Name"
-                  required
-                  value={formData.fullName}
-                  onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.fullName ? 'border-red-500' : ''} text-base appearance-none`}
-                  style={{
-                    WebkitAppearance: 'none',
-                    fontSize: '16px'
-                  }}
-                />
-              </div>
-              {fieldErrors.fullName && (
-                <p className="text-red-500 text-sm">{fieldErrors.fullName}</p>
+            <form onSubmit={handleSubmit} className="space-y-8">
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-4 text-sm text-red-500 bg-red-50 rounded-lg border border-red-100"
+                >
+                  {error}
+                </motion.div>
               )}
-            </div>
 
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <Input
-                  name="email"
-                  type="email"
-                  placeholder="Email Address"
-                  required
-                  value={formData.email}
-                  onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.email ? 'border-red-500' : ''} text-base appearance-none`}
-                  style={{
-                    WebkitAppearance: 'none',
-                    fontSize: '16px'
-                  }}
-                />
-                {isCheckingEmail && (
-                  <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
-                    Checking...
-                  </span>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-medium">Personal Information</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Please provide your personal details
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      name="fullName"
+                      type="text"
+                      placeholder="Full Name"
+                      value={formData.fullName}
+                      onChange={handleChange}
+                      className={`pl-10 ${fieldErrors.fullName ? 'border-red-500' : ''}`}
+                    />
+                  </div>
+                  {fieldErrors.fullName && (
+                    <p className="text-xs text-red-500">{fieldErrors.fullName}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      name="email"
+                      type="email"
+                      placeholder="Email Address"
+                      value={formData.email}
+                      onChange={handleChange}
+                      className={`pl-10 ${fieldErrors.email ? 'border-red-500' : ''}`}
+                    />
+                    {isCheckingEmail && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <div className="animate-spin h-4 w-4 border-2 border-[#8B0000] border-t-transparent rounded-full" />
+                      </div>
+                    )}
+                  </div>
+                  {fieldErrors.email && (
+                    <p className="text-xs text-red-500">{fieldErrors.email}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      name="phoneNumber"
+                      type="tel"
+                      placeholder="Phone Number"
+                      value={formData.phoneNumber}
+                      onChange={handleChange}
+                      className={`pl-10 ${fieldErrors.phoneNumber ? 'border-red-500' : ''}`}
+                    />
+                  </div>
+                  {fieldErrors.phoneNumber && (
+                    <p className="text-xs text-red-500">{fieldErrors.phoneNumber}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-medium">Residence Information</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Select your block and flat number
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4 z-10" />
+                    <Select value={formData.block} onValueChange={handleBlockChange}>
+                      <SelectTrigger className={`pl-10 ${fieldErrors.block ? 'border-red-500' : ''}`}>
+                        <SelectValue placeholder="Select Block" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[200px] overflow-y-auto">
+                        {Array.from({ length: 40 }, (_, i) => (
+                          <SelectItem key={i} value={`Block ${i + 1}`}>
+                            Block {i + 1}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {fieldErrors.block && (
+                    <p className="text-xs text-red-500">{fieldErrors.block}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4 z-10" />
+                    <Select value={formData.flatNumber} onValueChange={handleFlatChange}>
+                      <SelectTrigger className={`pl-10 ${fieldErrors.flatNumber ? 'border-red-500' : ''}`}>
+                        <SelectValue placeholder="Select Flat Number" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[200px] overflow-y-auto">
+                        {Array.from({ length: 12 }, (_, i) => (
+                          <SelectItem key={i} value={`Flat ${i + 1}`}>
+                            Flat {i + 1}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {fieldErrors.flatNumber && (
+                    <p className="text-xs text-red-500">{fieldErrors.flatNumber}</p>
+                  )}
+                </div>
+
+                {previewLocation && (
+                  <div className="p-3 bg-gray-50 rounded-md text-sm text-gray-600">
+                    Selected Location: {previewLocation}
+                  </div>
                 )}
               </div>
-              {fieldErrors.email && (
-                <p className="text-red-500 text-sm">{fieldErrors.email}</p>
-              )}
-            </div>
 
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <Input
-                  name="phoneNumber"
-                  type="tel"
-                  placeholder="Phone Number"
-                  required
-                  value={formData.phoneNumber}
-                  onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.phoneNumber ? 'border-red-500' : ''} text-base appearance-none`}
-                  style={{
-                    WebkitAppearance: 'none',
-                    fontSize: '16px'
-                  }}
-                />
-              </div>
-              {fieldErrors.phoneNumber && (
-                <p className="text-red-500 text-sm">{fieldErrors.phoneNumber}</p>
-              )}
-            </div>
-
-            {/* Residence Information */}
-            <div className="w-[350px] mb-2 mt-6">
-              <h3 className="text-lg font-semibold text-gray-700">Residence Information</h3>
-            </div>
-            {/* Block and Flat fields */}
-
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 z-10" />
-                <Select value={formData.block} onValueChange={handleBlockChange}>
-                  <SelectTrigger
-                    className={`pl-10 h-12 w-full ${fieldErrors.block ? 'border-red-500' : ''} text-base appearance-none`}
-                    style={{
-                      WebkitAppearance: 'none',
-                      fontSize: '16px'
-                    }}
-                  >
-                    <SelectValue placeholder="Select Block" />
-                  </SelectTrigger>
-                  <SelectContent
-                    position="popper"
-                    className={`${quicksand.className} font-sans w-[350px] max-h-[300px] overflow-y-auto z-50 bg-white`}
-                    sideOffset={5}
-                  >
-                    {Array.from({ length: 40 }, (_, i) => (
-                      <SelectItem
-                        key={i}
-                        value={`Block ${i + 1}`}
-                        className="hover:bg-gray-100 cursor-pointer"
-                      >
-                        Block {i + 1}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {fieldErrors.block && (
-                <p className="text-red-500 text-sm">{fieldErrors.block}</p>
-              )}
-            </div>
-
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 z-10" />
-                <Select value={formData.flatNumber} onValueChange={handleFlatChange}>
-                  <SelectTrigger className={`pl-10 h-12 w-full ${fieldErrors.flatNumber ? 'border-red-500' : ''} text-base appearance-none`} style={{ WebkitAppearance: 'none', fontSize: '16px' }}>
-                    <SelectValue placeholder="Select Flat Number" />
-                  </SelectTrigger>
-                  <SelectContent
-                    position="popper"
-                    className={`${quicksand.className} font-sans w-[350px] max-h-[300px] overflow-y-auto z-50 bg-white`}
-                    sideOffset={5}
-                  >
-                    {Array.from({ length: 12 }, (_, i) => (
-                      <SelectItem
-                        key={i}
-                        value={`Flat ${i + 1}`}
-                        className="hover:bg-gray-100 cursor-pointer"
-                      >
-                        Flat {i + 1}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {fieldErrors.flatNumber && (
-                <p className="text-red-500 text-sm">{fieldErrors.flatNumber}</p>
-              )}
-            </div>
-
-            {previewLocation && (
-              <div className="w-[350px] p-3 bg-gray-50 rounded-md text-sm text-gray-600">
-                Selected Location: {previewLocation}
-              </div>
-            )}
-
-            {/* Account Security */}
-            <div className="w-[350px] mb-2 mt-6">
-              <h3 className="text-lg font-semibold text-gray-700">Account Security</h3>
-            </div>
-            {/* Password Field */}
-
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <Input
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Password"
-                  required
-                  value={formData.password}
-                  onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.password ? 'border-red-500' : ''} text-base appearance-none`}
-                  style={{
-                    WebkitAppearance: 'none',
-                    fontSize: '16px'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                >
-                  {showPassword ? (
-                    <EyeOff className="text-gray-400" />
-                  ) : (
-                    <Eye className="text-gray-400" />
-                  )}
-                </button>
-              </div>
-              {fieldErrors.password ? (
-                <p className="text-red-500 text-sm">{fieldErrors.password}</p>
-              ) : (
-                <p className="text-gray-500 text-xs">
-                  Password must be at least 8 characters long with uppercase, lowercase, numbers, and special characters
-                </p>
-              )}
-            </div>
-
-            {/* Confirm Password Field */}
-            <div className="w-[350px] space-y-1">
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <Input
-                  name="confirmPassword"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Confirm Password"
-                  required
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  className={`pl-10 h-12 w-full ${fieldErrors.confirmPassword ? 'border-red-500' : ''} text-base appearance-none`}
-                  style={{
-                    WebkitAppearance: 'none',
-                    fontSize: '16px'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                >
-                  {showPassword ? (
-                    <EyeOff className="text-gray-400" />
-                  ) : (
-                    <Eye className="text-gray-400" />
-                  )}
-                </button>
-              </div>
-              {fieldErrors.confirmPassword && (
-                <p className="text-red-500 text-sm">{fieldErrors.confirmPassword}</p>
-              )}
-            </div>
-
-            <Button
-              type="submit"
-              disabled={!isFormValid() || isLoading || isEmailTaken || isCheckingEmail || isButtonDisabled}
-              className="w-[350px] h-12 bg-[#8B0000] text-white hover:bg-[#660000] transition-colors disabled:bg-gray-400"
-            >
-              {isLoading ? (
-                <div className="flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-2" />
-                  Signing up...
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-medium">Account Security</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Create a secure password for your account
+                  </p>
                 </div>
-              ) : isButtonDisabled ? (
-                "Please wait..."
-              ) : (
-                "Sign up"
-              )}
-            </Button>
-          </form>
-        </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      className={`pl-10 ${fieldErrors.password ? 'border-red-500' : ''}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="text-gray-400 h-4 w-4" />
+                      ) : (
+                        <Eye className="text-gray-400 h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {fieldErrors.password ? (
+                    <p className="text-xs text-red-500">{fieldErrors.password}</p>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      Password must be at least 8 characters with uppercase, lowercase, numbers, and special characters
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      name="confirmPassword"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Confirm Password"
+                      value={formData.confirmPassword}
+                      onChange={handleChange}
+                      className={`pl-10 ${fieldErrors.confirmPassword ? 'border-red-500' : ''}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="text-gray-400 h-4 w-4" />
+                      ) : (
+                        <Eye className="text-gray-400 h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {fieldErrors.confirmPassword && (
+                    <p className="text-xs text-red-500">{fieldErrors.confirmPassword}</p>
+                  )}
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                disabled={!isFormValid() || isLoading || isEmailTaken || isCheckingEmail || isButtonDisabled}
+                className={cn(
+                  "w-full h-12 text-lg font-medium transition-all duration-200",
+                  "bg-[#8B0000] text-white hover:bg-[#6B0000]",
+                  "disabled:opacity-50 disabled:cursor-not-allowed",
+                  "shadow-lg hover:shadow-xl",
+                  "rounded-lg"
+                )}
+              >
+                {isLoading ? (
+                  <div className="flex items-center justify-center">
+                    <div className="animate-spin h-5 w-5 border-3 border-white border-t-transparent rounded-full mr-3" />
+                    Creating your account...
+                  </div>
+                ) : (
+                  "Create Account"
+                )}
+              </Button>
+            </form>
+
+            <div className="text-center">
+              <p className="text-gray-500">
+                Already have an account?{" "}
+                <Link
+                  href="/auth/login"
+                  className="text-[#8B0000] hover:text-[#6B0000] font-medium hover:underline"
+                >
+                  Login here
+                </Link>
+              </p>
+            </div>
+          </div>
+        </motion.div>
       </main>
 
-      <div className="w-[350px] text-center mt-4">
-        <p className="text-gray-600">
-          Already have an account?{" "}
-          <Link href="/auth/login" className="text-[#8B0000] hover:underline">
-            Login here
-          </Link>
-        </p>
-      </div>
-
-      <footer className="py-4 text-center text-base md:text-lg font-medium text-gray-500">
-        Powered by{" "}
-        <a
-          href="https://uvise.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[#8B0000] hover:underline"
-        >
-          UVISE
-        </a>
+      <footer className="mt-12 py-6 text-center text-sm text-gray-500 border-t">
+        <div className="container max-w-screen-2xl mx-auto px-4">
+          <p>
+            Powered by{" "}
+            <a
+              href="https://uvise.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#8B0000] hover:text-[#6B0000] font-medium hover:underline"
+            >
+              UVISE
+            </a>
+          </p>
+        </div>
       </footer>
     </div>
   )

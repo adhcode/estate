@@ -12,6 +12,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { toast } from "react-hot-toast";
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 
 export interface AddMemberDialogProps {
     isOpen: boolean;
@@ -29,25 +31,65 @@ export function AddMemberDialog({ isOpen, setIsOpen, onMemberAdded }: AddMemberD
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    const supabase = createClientComponentClient()
+
     const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
+        e.preventDefault()
+        setIsSubmitting(true)
+
         try {
-            await onMemberAdded();
+            const { data: session } = await supabase.auth.getSession()
+            if (!session?.session?.user) {
+                toast.error('Please login again')
+                return
+            }
+
+            const userId = session.session.user.id
+            const tempPassword = Math.random().toString(36).slice(-8)
+
+            // Match the exact property names expected by the API
+            const response = await fetch('/api/household-member', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    first_name: formData.first_name,      // Use snake_case
+                    last_name: formData.last_name,        // Use snake_case
+                    email: formData.email,
+                    phone_number: formData.phone_number,
+                    relationship: formData.relationship,
+                    tempPassword,
+                    primary_resident_id: userId,
+                    origin: window.location.origin
+                }),
+            })
+
+            const responseData = await response.json()
+            console.log('API Response:', responseData)  // Log the response
+
+            if (!response.ok) {
+                throw new Error(responseData.error || 'Failed to add member')
+            }
+
+            await onMemberAdded()
             setFormData({
-                first_name: "",
-                last_name: "",
-                email: "",
-                phone_number: "",
-                relationship: "",
-            });
-            setIsOpen(false);
+                first_name: '',
+                last_name: '',
+                email: '',
+                phone_number: '',
+                relationship: ''
+            })
+            setIsOpen(false)
+            toast.success('Member added and invitation sent')
+
         } catch (error) {
-            console.error('Error adding member:', error);
+            console.error('Error in form submission:', error)
+            toast.error(error instanceof Error ? error.message : 'Failed to add member')
         } finally {
-            setIsSubmitting(false);
+            setIsSubmitting(false)
         }
-    };
+    }
 
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>

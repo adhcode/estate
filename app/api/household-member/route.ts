@@ -35,7 +35,8 @@ export async function POST(request: Request) {
             email_confirm: true,
             user_metadata: {
                 full_name: `${body.first_name} ${body.last_name}`,
-                role: 'household_member'
+                role: 'household_member',
+                temporary_password: true
             }
         });
 

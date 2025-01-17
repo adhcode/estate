@@ -11,6 +11,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger, Drawer
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Loader } from "@/app/components/Loader"
+
 import {
   ChevronLeft,
   ArrowUpRight,
@@ -23,6 +24,9 @@ import {
   Search,
   Copy,
   Check,
+  Eye,
+  X,
+  AlertTriangle,
 } from "lucide-react"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { Label } from "@/components/ui/label"
@@ -163,6 +167,120 @@ const ReportIssueDialog = ({ guest, isOpen, onOpenChange, onStatusUpdate }: {
             <p className="text-center">Report submitted successfully!</p>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+interface DesktopGuestDetailsDialogProps {
+  guest: Guest | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onCopyId: (id: string) => void;
+  copiedId: string | null;
+  onCancel: (guest: Guest) => void;
+  onReport: (guest: Guest) => void;
+  getStatusColor: (status: string) => string;
+}
+
+const DesktopGuestDetailsDialog = ({
+  guest,
+  isOpen,
+  onClose,
+  onCopyId,
+  copiedId,
+  onCancel,
+  onReport,
+  getStatusColor
+}: DesktopGuestDetailsDialogProps) => {
+  if (!guest) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[425px] bg-white">
+        <DialogHeader>
+          <DialogTitle>Guest Details</DialogTitle>
+          <DialogDescription>
+            View detailed information about your guest.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-500">Guest ID</Label>
+            <div className="flex items-center justify-between bg-gray-50 p-3 rounded-md">
+              <span className="font-medium">{guest.guest_id}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onCopyId(guest.guest_id)}
+                className="h-8 px-2 hover:bg-gray-100"
+              >
+                {copiedId === guest.guest_id ? (
+                  <div className="flex items-center space-x-1 text-green-600">
+                    <Check className="h-4 w-4" />
+                    <span className="text-xs">Copied</span>
+                  </div>
+                ) : (
+                  <Copy className="h-4 w-4 text-gray-600" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-500">Full Name</Label>
+            <p className="text-gray-900">{guest.full_name}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-500">Visit Date</Label>
+            <p className="text-gray-900">
+              {new Date(guest.visit_date).toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-500">Visit Time</Label>
+            <p className="text-gray-900">{guest.visit_time}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-500">Purpose of Visit</Label>
+            <p className="text-gray-900">{guest.purpose_of_visit}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-gray-500">Status</Label>
+            <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white`}>
+              {guest.status}
+            </Badge>
+          </div>
+
+          {guest.status === 'pending' && (
+            <Button
+              variant="destructive"
+              onClick={() => onCancel(guest)}
+              className="w-full bg-red-500 text-white hover:bg-red-600"
+            >
+              Cancel Guest
+            </Button>
+          )}
+
+          {guest.status === 'active' && (
+            <Button
+              variant="outline"
+              onClick={() => onReport(guest)}
+              className="w-full bg-yellow-500 text-white hover:bg-yellow-600"
+            >
+              Report Issue with Guest
+            </Button>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -313,9 +431,14 @@ export default function GuestHistory() {
     useEffect(() => {
       const fetchRegisteredBy = async () => {
         try {
-          console.log("Fetching user for ID:", guest.registered_by);
+          const { data: { user } } = await supabase.auth.getUser();
 
-          // First try to fetch from users table
+          if (guest.registered_by === user?.id) {
+            setRegisteredBy("You");
+            return;
+          }
+
+          // If not registered by current user, fetch the name
           const { data: userData, error: userError } = await supabase
             .from('users')
             .select('full_name')
@@ -327,7 +450,6 @@ export default function GuestHistory() {
           }
 
           if (userData) {
-            console.log("Found user:", userData);
             setRegisteredBy(userData.full_name);
           } else {
             // If not found in users, try household_members table
@@ -342,8 +464,6 @@ export default function GuestHistory() {
             }
 
             if (householdData) {
-              console.log("Found household member:", householdData);
-              // Combine first and last name
               const fullName = `${householdData.first_name} ${householdData.last_name}`;
               setRegisteredBy(fullName);
             }
@@ -364,7 +484,7 @@ export default function GuestHistory() {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
         transition={{ duration: 0.3 }}
-        className="space-y-4 font-quicksand"
+        className="space-y-4 font-quicksand px-6 py-8"
       >
         <div className="space-y-2">
           <Label className="text-sm font-medium text-gray-500">Guest ID</Label>
@@ -491,59 +611,69 @@ export default function GuestHistory() {
         return;
       }
 
-      const { data: userData } = await supabase
+      // First try to get user from users table (for primary residents)
+      const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('role')
+        .select('*')
         .eq('id', user.id)
         .single();
 
-      if (userData && userData.role === 'resident') {
-        // Get primary resident's guests
-        const { data: primaryGuestsData } = await supabase
-          .from('guests')
-          .select('*')
-          .eq('registered_by', user.id);
-
-        // Get household members
-        const { data: householdMembers } = await supabase
+      // If not found in users table, check household_members table
+      if (!userData) {
+        const { data: householdData, error: householdError } = await supabase
           .from('household_members')
           .select('*')
-          .eq('primary_resident_id', user.id);
+          .eq('id', user.id)
+          .single();
 
-        let allGuests = primaryGuestsData || [];
-
-        if (householdMembers && householdMembers.length > 0) {
-          for (const member of householdMembers) {
-            const { data: memberGuests } = await supabase
-              .from('guests')
-              .select('*')
-              .eq('registered_by', member.id);
-
-            if (memberGuests) {
-              allGuests = [...allGuests, ...memberGuests];
-            }
-          }
+        if (householdError) {
+          console.error('Error fetching household member:', householdError);
+          toast.error('Failed to load user data');
+          return;
         }
 
-        // Sort guests by created_at date in descending order (latest first)
-        allGuests.sort((a, b) => {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        });
+        if (householdData) {
+          // For household members, only show their own registered guests
+          const { data: guestsData, error: guestsError } = await supabase
+            .from('guests')
+            .select('*')
+            .eq('registered_by', householdData.id)
+            .order('created_at', { ascending: false });
 
-        setGuests(allGuests);
+          if (guestsError) {
+            console.error('Error fetching guests:', guestsError);
+          }
+
+          setGuests(guestsData || []);
+        }
       } else {
-        const { data: guestData } = await supabase
+        // For primary residents
+        const { data: householdMembers, error: householdError } = await supabase
+          .from('household_members')
+          .select('id')
+          .eq('primary_resident_id', userData.id);
+
+        if (householdError) {
+          console.error('Error fetching household members:', householdError);
+        }
+
+        const registeredByIds = [userData.id, ...(householdMembers?.map(member => member.id) || [])];
+
+        const { data: guestsData, error: guestsError } = await supabase
           .from('guests')
           .select('*')
-          .eq('registered_by', user.id)
+          .in('registered_by', registeredByIds)
           .order('created_at', { ascending: false });
 
-        setGuests(guestData || []);
-      }
+        if (guestsError) {
+          console.error('Error fetching guests:', guestsError);
+        }
 
+        setGuests(guestsData || []);
+      }
     } catch (error) {
-      console.error('Error in fetchGuestHistory:', error);
-      toast.error('Failed to load guest history. Please try again.');
+      console.error('Error:', error);
+      toast.error('Failed to load guest history');
     } finally {
       setLoading(false);
     }
@@ -552,6 +682,52 @@ export default function GuestHistory() {
   useEffect(() => {
     fetchGuestHistory();
   }, [supabase]);
+
+  // Mobile view component
+  const MobileView = () => (
+    <div className="space-y-2">
+      {currentGuests.map((guest, index) => (
+        <div key={index} className="flex justify-between items-center py-2 border-b">
+          <div>
+            <p className="font-medium font-quicksand">{guest.full_name}</p>
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500 font-quicksand">{guest.guest_id}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleCopyGuestId(guest.guest_id)}
+                  className="h-8 px-2 hover:bg-gray-100 ml-2"
+                >
+                  {copiedId === guest.guest_id ? (
+                    <div className="flex items-center space-x-1 text-green-600">
+                      <Check className="h-4 w-4" />
+                      <span className="text-xs font-quicksand">Copied</span>
+                    </div>
+                  ) : (
+                    <Copy className="h-4 w-4 text-gray-600" />
+                  )}
+                </Button>
+              </div>
+              <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white font-quicksand`}>
+                {guest.status}
+              </Badge>
+            </div>
+          </div>
+          <Drawer>
+            <DrawerTrigger asChild>
+              <Button variant="ghost" onClick={() => openGuestDetails(guest)}>
+                <ArrowUpRight className="text-gray-400" size={20} />
+              </Button>
+            </DrawerTrigger>
+            <DrawerContent className="px-0 pt-4 pb-8">
+              <GuestDetailsContent guest={guest} />
+            </DrawerContent>
+          </Drawer>
+        </div>
+      ))}
+    </div>
+  );
 
   if (loading) {
     return <Loader />
@@ -602,100 +778,68 @@ export default function GuestHistory() {
                 />
               </div>
               {isMobile ? (
-                <div className="space-y-2">
-                  {currentGuests.map((guest, index) => (
-                    <div key={index} className="flex justify-between items-center py-2 border-b">
-                      <div>
-                        <p className="font-medium font-quicksand">{guest.full_name}</p>
-                        <div className="flex items-center space-x-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-500 font-quicksand">{guest.guest_id}</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCopyGuestId(guest.guest_id)}
-                              className="h-8 px-2 hover:bg-gray-100 ml-2"
-                            >
-                              {copiedId === guest.guest_id ? (
-                                <div className="flex items-center space-x-1 text-green-600">
-                                  <Check className="h-4 w-4" />
-                                  <span className="text-xs font-quicksand">Copied</span>
-                                </div>
-                              ) : (
-                                <Copy className="h-4 w-4 text-gray-600" />
-                              )}
-                            </Button>
-                          </div>
-                          <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white font-quicksand`}>
-                            {guest.status}
-                          </Badge>
-                        </div>
-                      </div>
-                      <Drawer>
-                        <DrawerTrigger asChild>
-                          <Button variant="ghost" onClick={() => openGuestDetails(guest)}>
-                            <ArrowUpRight className="text-gray-400" size={20} />
-                          </Button>
-                        </DrawerTrigger>
-                        <DrawerContent className="w-[90%] max-w-[400px] mx-auto bg-white">
-                          <DrawerHeader className="text-center">
-                            <DrawerTitle className="font-quicksand">Guest Details</DrawerTitle>
-                            <DrawerDescription className="text-center text-muted-foreground font-quicksand">
-                              View detailed information about your guest.
-                            </DrawerDescription>
-                          </DrawerHeader>
-                          <div className="p-4">
-                            <GuestDetailsContent guest={guest} />
-                          </div>
-                        </DrawerContent>
-                      </Drawer>
-                    </div>
-                  ))}
-                </div>
+                <MobileView />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Guest ID</TableHead>
-                      <TableHead>Full Name</TableHead>
-                      <TableHead>Visit Date</TableHead>
-                      <TableHead>Visit Time</TableHead>
-                      <TableHead>Purpose of Visit</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {currentGuests.map((guest, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{guest.guest_id}</TableCell>
-                        <TableCell>{guest.full_name}</TableCell>
-                        <TableCell>{new Date(guest.visit_date).toLocaleDateString('en-US', {
-                          weekday: 'long',
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        })}</TableCell>
-                        <TableCell>{guest.visit_time}</TableCell>
-                        <TableCell>{guest.purpose_of_visit}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white`}>
-                            {guest.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openGuestDetails(guest)}
-                          >
-                            <ArrowUpRight className="text-gray-400" size={20} />
-                          </Button>
-                        </TableCell>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Guest ID</TableHead>
+                        <TableHead>Full Name</TableHead>
+                        <TableHead className="hidden md:table-cell">Visit Date</TableHead>
+                        <TableHead className="hidden md:table-cell">Visit Time</TableHead>
+                        <TableHead className="hidden md:table-cell">Purpose</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {currentGuests.map((guest) => (
+                        <TableRow key={guest.guest_id}>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {guest.guest_id}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleCopyGuestId(guest.guest_id)}
+                                className="h-8 w-8"
+                              >
+                                {copiedId === guest.guest_id ? (
+                                  <Check className="h-4 w-4 text-green-500" />
+                                ) : (
+                                  <Copy className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell>{guest.full_name}</TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            {new Date(guest.visit_date).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">{guest.visit_time}</TableCell>
+                          <TableCell className="hidden md:table-cell">{guest.purpose_of_visit}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`${getStatusColor(guest.status)} text-white`}>
+                              {guest.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="hidden md:flex justify-end">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openGuestDetails(guest)}
+                              >
+                                <ArrowUpRight className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
               {filteredGuests.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
@@ -727,6 +871,23 @@ export default function GuestHistory() {
           </Card>
         </motion.div>
       </main>
+
+      {/* Desktop Guest Details Dialog - Only show on desktop */}
+      {!isMobile && (
+        <DesktopGuestDetailsDialog
+          guest={selectedGuest}
+          isOpen={!!selectedGuest}
+          onClose={() => setSelectedGuest(null)}
+          onCopyId={handleCopyGuestId}
+          copiedId={copiedId}
+          onCancel={handleOpenCancelDialog}
+          onReport={(guest) => {
+            setSelectedGuestForReport(guest);
+            setIsReportDialogOpen(true);
+          }}
+          getStatusColor={getStatusColor}
+        />
+      )}
     </div>
   )
 }

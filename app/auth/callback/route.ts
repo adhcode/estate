@@ -4,30 +4,38 @@ import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
   try {
-    // Get the current URL from the request
-    const url = new URL(request.url)
-    const code = url.searchParams.get('code')
+    const requestUrl = new URL(request.url)
+    const code = requestUrl.searchParams.get('code')
 
     if (code) {
-      const cookieStore = cookies()
-      const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
+      const supabase = createRouteHandlerClient({ cookies })
       
-      // Exchange the code for a session
-      const { error } = await supabase.auth.exchangeCodeForSession(code)
-      
-      if (error) {
-        console.error('Auth error:', error)
-        // Redirect to error page or login with error parameter
-        return NextResponse.redirect(`${url.origin}/auth/login?error=auth_error`)
+      // Exchange code for session
+      const { error: authError } = await supabase.auth.exchangeCodeForSession(code)
+      if (authError) throw authError
+
+      // Get the user
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError) throw userError
+
+      if (user) {
+        // Update user status to active
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ status: 'active' })
+          .eq('id', user.id)
+        
+        if (updateError) throw updateError
+
+        // Redirect directly to dashboard after verification
+        return NextResponse.redirect(`${requestUrl.origin}/resident/dashboard`)
       }
     }
 
-    // Redirect to verify-email page after successful verification
-    return NextResponse.redirect(`${url.origin}/auth/verify-email`)
-
+    return NextResponse.redirect(`${requestUrl.origin}/auth/login?error=Invalid verification link`)
   } catch (error) {
     console.error('Callback error:', error)
-    // Redirect to login page if something goes wrong
-    return NextResponse.redirect('https://lkjgardensigando.com/auth/login?error=callback_error')
+    const url = new URL(request.url)
+    return NextResponse.redirect(`${url.origin}/auth/login?error=Verification failed`)
   }
 } 
