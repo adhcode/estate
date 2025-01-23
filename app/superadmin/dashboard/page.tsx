@@ -35,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface DashboardStats {
   totalResidents: number
-  totalProperties: number
+  totalOccupied: number
   facilityMaintenance: {
     completed: number
     pending: number
@@ -161,7 +161,7 @@ interface OccupancyData {
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     totalResidents: 0,
-    totalProperties: 0,
+    totalOccupied: 0,
     facilityMaintenance: {
       completed: 0,
       pending: 0
@@ -208,6 +208,12 @@ export default function SuperAdminDashboard() {
         .from('household_members')
         .select('*', { count: 'exact' })
 
+      // Fetch occupied flats count
+      const { count: occupiedCount } = await supabase
+        .from('users')
+        .select('*', { count: 'exact' })
+        .not('flat_number', 'is', null)
+
       // Fetch maintenance stats
       const { data: maintenanceData } = await supabase
         .from('maintenance_requests')
@@ -227,7 +233,7 @@ export default function SuperAdminDashboard() {
 
       setStats({
         totalResidents: (usersCount || 0) + (householdCount || 0),
-        totalProperties: 492, // Your total properties constant
+        totalOccupied: occupiedCount || 0,
         facilityMaintenance: {
           completed,
           pending: total - completed
@@ -452,8 +458,8 @@ export default function SuperAdminDashboard() {
           color="bg-blue-100"
         />
         <StatCard
-          title="Total Flats"
-          value={stats.totalProperties}
+          title="Occupied Flats"
+          value={`${stats.totalOccupied} / ${TOTAL_ESTATE_FLATS}`}
           icon={Building2}
           color="bg-green-100"
         />
