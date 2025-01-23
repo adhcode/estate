@@ -1,161 +1,163 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import Link from "next/link"
-import { Loader2, Mail, Lock } from "lucide-react"
+import { Loader2, Mail, Lock, Eye, EyeOff } from "lucide-react"
 import { motion } from "framer-motion"
 import { quicksand } from "@/app/fonts"
+import { User } from "@supabase/supabase-js"
+import { z } from "zod"
+
+const formSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+})
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [attempts, setAttempts] = useState(0)
+  const [lastAttempt, setLastAttempt] = useState<Date | null>(null)
   const router = useRouter()
   const supabase = createClientComponentClient()
+  const MAX_ATTEMPTS = 50
+  const COOLDOWN_MINUTES = 1
+  const COOLDOWN_RESET = 5
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
+  useEffect(() => {
+    const storedAttempts = localStorage.getItem('loginAttempts')
+    const storedLastAttempt = localStorage.getItem('lastLoginAttempt')
+
+    if (storedAttempts) setAttempts(parseInt(storedAttempts))
+    if (storedLastAttempt) setLastAttempt(new Date(storedLastAttempt))
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('loginAttempts', attempts.toString())
+    if (lastAttempt) localStorage.setItem('lastLoginAttempt', lastAttempt.toISOString())
+  }, [attempts, lastAttempt])
+
+  const checkRateLimit = () => {
+    if (attempts >= MAX_ATTEMPTS && lastAttempt) {
+      const timeSinceLastAttempt = Math.floor((new Date().getTime() - lastAttempt.getTime()) / 60000)
+
+      // Quick complete reset
+      if (timeSinceLastAttempt >= COOLDOWN_RESET) {
+        setAttempts(0)
+        setLastAttempt(null)
+        localStorage.removeItem('loginAttempts')
+        localStorage.removeItem('lastLoginAttempt')
+        return false
+      }
+
+      // Brief cooldown with clear message
+      if (timeSinceLastAttempt < COOLDOWN_MINUTES) {
+        setError(`System busy, please try again in ${COOLDOWN_MINUTES} minute`)
+        return true
+      }
+
+      // Quick partial reset
+      setAttempts(10)
+      return false
+    }
+    return false
+  }
+
+  const handleLogin = async (values: z.infer<typeof formSchema>) => {
     setLoading(true)
-
     try {
-      console.log('Attempting to sign in with:', email)
-      // First attempt to sign in
-      const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      console.log('Starting login attempt for:', values.email)
+
+      // 1. First authenticate the user
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: values.email,
+        password: values.password,
       })
 
-      if (signInError) {
-        console.error('Sign in error:', signInError)
-        throw signInError
-      }
-      if (!user) throw new Error('No user found')
+      if (authError) throw authError
+      console.log('Auth successful, checking user role...')
 
-      console.log('Successfully signed in user:', user.id)
+      if (!authData.user) throw new Error('No user data')
 
-      // Get user metadata to check if password change is required
-      const { data: { user: currentUser } } = await supabase.auth.getUser()
-      if (!currentUser) throw new Error('Unable to get user data')
+      // 2. Check user role in different tables
+      // Check super_admin first since that's what we're testing
+      const { data: superAdminData, error: superAdminError } = await supabase
+        .from('super_admins')
+        .select('id, email')  // Be explicit about what we're selecting
+        .eq('email', values.email)  // Match by email instead of id
+        .single()
 
-      console.log('Full user metadata:', currentUser)
-      console.log('Temporary password flag:', currentUser.user_metadata?.temporary_password)
-      const isTemporaryPassword = currentUser.user_metadata?.temporary_password === true
-
-      // If using temporary password, redirect to change password immediately
-      if (isTemporaryPassword) {
-        console.log('Temporary password detected, redirecting to change password')
-        toast.info("Please change your temporary password", {
-          duration: 5000,
-          position: 'top-center'
-        })
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        router.push('/auth/set-password')
+      if (superAdminData) {
+        console.log('User found in super_admin table')
+        router.push('/superadmin/dashboard')
         return
       }
 
-      // Check if user is in users table (resident)
-      const { data: residentData, error: residentError } = await supabase
+      // Then check other roles if needed
+      const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle()
+        .select('id, email')
+        .eq('email', values.email)
+        .single()
 
-      if (residentError) {
-        console.error('Error checking resident status:', residentError)
-        throw new Error('Error checking user status')
-      }
-
-      console.log('Resident check result:', residentData)
-
-      if (residentData) {
-        console.log('User is a resident, redirecting to dashboard')
-        toast.success("Welcome back!")
+      if (userData) {
+        console.log('User found in residents table')
         router.push('/resident/dashboard')
         return
       }
 
-      // If not in users table, check household_members table
-      const { data: memberData, error: memberError } = await supabase
+      // Check household members
+      const { data: householdData, error: householdError } = await supabase
         .from('household_members')
-        .select('invitation_status')
-        .eq('id', user.id)
-        .maybeSingle()
+        .select('id, email')
+        .eq('email', values.email)
+        .single()
 
-      if (memberError) {
-        console.error('Error checking member status:', memberError)
-        throw new Error('Error checking member status')
+      if (householdData) {
+        console.log('User found in household members table')
+        router.push('/resident/dashboard')
+        return
       }
 
-      console.log('Member check result:', memberData)
+      // Check staff
+      const { data: staffData, error: staffError } = await supabase
+        .from('staff')
+        .select('id, email')
+        .eq('email', values.email)
+        .single()
 
-      if (memberData) {
-        switch (memberData.invitation_status) {
-          case 'pending':
-          case 'sent':
-            console.log('Member invitation is pending/sent')
-            toast.error("Please check your email for an invitation to complete your account setup.", {
-              duration: 5000,
-              position: 'top-center'
-            })
-            await supabase.auth.signOut()
-            setTimeout(() => {
-              window.location.href = '/auth/login'
-            }, 2000)
-            return
-
-          case 'accepted':
-            console.log('Member is accepted, redirecting to dashboard')
-            toast.success("Welcome back!", {
-              duration: 3000,
-              position: 'top-center'
-            })
-            await new Promise(resolve => setTimeout(resolve, 1000))
-            router.push('/resident/dashboard')
-            return
-
-          default:
-            console.log(`Unknown invitation status: ${memberData.invitation_status}`)
-            toast.error("Invalid account status. Please contact support.", {
-              duration: 5000,
-              position: 'top-center'
-            })
-            await supabase.auth.signOut()
-            setTimeout(() => {
-              window.location.href = '/auth/login'
-            }, 2000)
-            return
-        }
+      if (staffData) {
+        console.log('User found in staff table')
+        router.push('/admin/dashboard')
+        return
       }
 
-      // If we get here, the user isn't in either table
-      console.log('User not found in either table')
-      toast.error("Account not found. Please contact support.", {
-        duration: 5000,
-        position: 'top-center'
-      })
-      await supabase.auth.signOut()
-      setTimeout(() => {
-        window.location.href = '/auth/login'
-      }, 2000)
+      // If we get here, user exists in auth but not in any role
+      throw new Error('User not found in any role')
 
-    } catch (error: any) {
-      console.error('Login error:', error)
-      if (error.message.includes('Email not confirmed')) {
-        toast.error("Please verify your email before logging in")
-      } else if (error.message.includes('Invalid login credentials')) {
-        toast.error("Invalid email or password")
-      } else {
-        toast.error(error.message || 'An error occurred during login')
-      }
-      await supabase.auth.signOut()
+    } catch (error) {
+      console.error('Login error details:', error)
+      toast.error('Invalid login credentials')
     } finally {
       setLoading(false)
     }
+  }
+
+  const resetRateLimit = () => {
+    setAttempts(0)
+    setLastAttempt(null)
+    localStorage.removeItem('loginAttempts')
+    localStorage.removeItem('lastLoginAttempt')
+    setError(null)
+    toast.success('Rate limit reset. You can try logging in again.', { duration: 3000 })
   }
 
   return (
@@ -208,7 +210,17 @@ export default function LoginPage() {
               </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-8">
+            <form onSubmit={(e) => {
+              e.preventDefault()
+              handleLogin({ email, password })
+            }} className="space-y-8">
+              {/* Show error message if exists */}
+              {error && (
+                <div className="p-3 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg">
+                  {error}
+                </div>
+              )}
+
               <div className="space-y-4">
                 <div className="space-y-2">
                   <div className="relative">
@@ -228,13 +240,24 @@ export default function LoginPage() {
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                     <Input
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       placeholder="Password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      className="pl-10"
+                      className="pl-10 pr-10"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -248,10 +271,27 @@ export default function LoginPage() {
                 </Link>
               </div>
 
+              {attempts >= MAX_ATTEMPTS && (
+                <div className="p-3 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="mb-2">Too many login attempts</p>
+                  <Button
+                    type="button"
+                    onClick={resetRateLimit}
+                    variant="outline"
+                    className="text-sm"
+                  >
+                    Reset Login Attempts
+                  </Button>
+                </div>
+              )}
+
               <Button
+                id="loginButton"
                 type="submit"
                 disabled={loading}
-                className="w-full h-12 text-lg font-medium transition-all duration-200 bg-[#8B0000] text-white hover:bg-[#6B0000] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl rounded-lg"
+                className="w-full h-12 text-lg font-medium transition-all duration-200 
+                    bg-[#8B0000] text-white hover:bg-[#6B0000] disabled:opacity-50 
+                    disabled:cursor-not-allowed shadow-lg hover:shadow-xl rounded-lg"
               >
                 {loading ? (
                   <div className="flex items-center justify-center">

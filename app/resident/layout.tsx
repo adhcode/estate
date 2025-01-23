@@ -21,7 +21,7 @@ export default async function ResidentLayout({
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
-    redirect('/login')
+    redirect('/auth/login')
   }
 
   // Fetch user profile data including avatar_url

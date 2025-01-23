@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import {
   Users, Calendar, MessageSquare, Bell, Shield,
   Activity, Megaphone, Building, Heart, Coffee,
-  Ticket, Utensils, Music, Zap, ArrowRight, Sparkles
+  Ticket, Utensils, Music, Zap, ArrowRight, Sparkles, ShoppingBag
 } from "lucide-react"
 import Link from "next/link"
 import { useState, useEffect } from "react"
@@ -66,17 +66,18 @@ export default function DashboardPage() {
   useEffect(() => {
     async function initializePage() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        console.log('Auth User:', user);
+        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        console.log('Auth User:', user)
 
         if (authError) {
-          console.error('Auth Error:', authError);
-          throw authError;
+          console.error('Auth Error:', authError)
+          router.push('/auth/login')
+          return
         }
 
         if (!user) {
-          router.push('/auth/login');
-          return;
+          router.push('/auth/login')
+          return
         }
 
         // Try to get user data from users table
@@ -84,18 +85,18 @@ export default function DashboardPage() {
           .from('users')
           .select('*')
           .eq('email', user.email)
-          .single();
+          .single()
 
-        console.log('Users Query Result:', { userData, userError });
+        console.log('Users Query Result:', { userData, userError })
 
         if (userData) {
           if (!userData.profile_completed) {
-            setNeedsProfileSetup(true);
+            setNeedsProfileSetup(true)
           }
-          setUserRole(userData.role);
-          setFirstName(userData.full_name.split(' ')[0]);
-          setLoading(false);
-          return;
+          setUserRole(userData.role)
+          setFirstName(userData.full_name.split(' ')[0])
+          setLoading(false)
+          return
         }
 
         // Try household_members table
@@ -103,35 +104,35 @@ export default function DashboardPage() {
           .from('household_members')
           .select('*')
           .eq('email', user.email)
-          .single();
+          .single()
 
-        console.log('Household Members Query Result:', { memberData, memberError });
+        console.log('Household Members Query Result:', { memberData, memberError })
 
         if (memberData) {
           if (!memberData.profile_completed) {
-            setNeedsProfileSetup(true);
+            setNeedsProfileSetup(true)
           }
-          setUserRole('household_member');
-          setFirstName(memberData.first_name);
-          setLoading(false);
-          return;
+          setUserRole('household_member')
+          setFirstName(memberData.first_name)
+          setLoading(false)
+          return
         }
 
         // If we get here, the user wasn't found in either table
-        console.error('User not found in any table. Email:', user.email);
-        toast.error('User profile not found. Please contact support.');
-        router.push('/auth/login');
+        console.error('User not found in any table. Email:', user.email)
+        toast.error('User profile not found. Please contact support.')
+        router.push('/auth/login')
 
       } catch (error) {
-        console.error('Error in initializePage:', error);
-        toast.error('Failed to load user data');
+        console.error('Error in initializePage:', error)
+        toast.error('Failed to load user data')
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
     }
 
-    initializePage();
-  }, [supabase, router]);
+    initializePage()
+  }, [supabase, router])
 
   if (loading) {
     return <Loader />
@@ -140,7 +141,6 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-white font-quicksand">
       {needsProfileSetup && <ProfileSetup />}
-      {/* Hero Section - Restored original design */}
       <motion.section
         className="relative pt-8 pb-16 px-4 bg-gradient-to-b from-[#8B0000]/5 to-white"
         initial={{ opacity: 0 }}
@@ -174,7 +174,7 @@ export default function DashboardPage() {
               transition={{ delay: 0.3 }}
             >
               Welcome to <span className="text-[#8B0000] relative">
-                LKJ Estate Connect
+                LKJ Gardens Connect
                 <motion.span
                   className="absolute -top-4 -right-4 md:-top-6 md:-right-6"
                   animate={{
@@ -186,7 +186,6 @@ export default function DashboardPage() {
                     repeat: Infinity
                   }}
                 >
-                  <Sparkles className="h-4 w-4 md:h-6 md:w-6 text-[#8B0000]" />
                 </motion.span>
               </span>
             </motion.h1>
@@ -272,7 +271,6 @@ export default function DashboardPage() {
                 description: "Community gatherings",
                 href: "/resident/events",
               },
-
               {
                 icon: Ticket,
                 title: "Amenities",
@@ -284,6 +282,12 @@ export default function DashboardPage() {
                 title: "Forums",
                 description: "Join discussions",
                 href: "/resident/forum",
+              },
+              {
+                icon: ShoppingBag,
+                title: "Marketplace",
+                description: "Buy and sell items",
+                href: "/resident/marketplace",
               }
             ].map((feature, index) => (
               <motion.div key={index} variants={item}>

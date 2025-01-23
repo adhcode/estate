@@ -178,9 +178,11 @@ interface DesktopGuestDetailsDialogProps {
   onClose: () => void;
   onCopyId: (id: string) => void;
   copiedId: string | null;
-  onCancel: (guest: Guest) => void;
+  handleOpenCancelDialog: (guest: Guest) => void;
   onReport: (guest: Guest) => void;
   getStatusColor: (status: string) => string;
+  setEditingGuest: (guest: Guest | null) => void;
+  setIsEditDialogOpen: (open: boolean) => void;
 }
 
 const DesktopGuestDetailsDialog = ({
@@ -189,9 +191,11 @@ const DesktopGuestDetailsDialog = ({
   onClose,
   onCopyId,
   copiedId,
-  onCancel,
+  handleOpenCancelDialog,
   onReport,
-  getStatusColor
+  getStatusColor,
+  setEditingGuest,
+  setIsEditDialogOpen
 }: DesktopGuestDetailsDialogProps) => {
   if (!guest) return null;
 
@@ -262,13 +266,25 @@ const DesktopGuestDetailsDialog = ({
           </div>
 
           {guest.status === 'pending' && (
-            <Button
-              variant="destructive"
-              onClick={() => onCancel(guest)}
-              className="w-full bg-red-500 text-white hover:bg-red-600"
-            >
-              Cancel Guest
-            </Button>
+            <div className="space-y-2">
+              <Button
+                variant="default"
+                onClick={() => {
+                  setEditingGuest(guest)
+                  setIsEditDialogOpen(true)
+                }}
+                className="w-full bg-blue-500 text-white hover:bg-blue-600"
+              >
+                Edit Guest
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => handleOpenCancelDialog(guest)}
+                className="w-full bg-red-500 text-white hover:bg-red-600"
+              >
+                Cancel Guest
+              </Button>
+            </div>
           )}
 
           {guest.status === 'active' && (
@@ -305,6 +321,8 @@ export default function GuestHistory() {
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
   const itemsPerPage = 10
+  const [editingGuest, setEditingGuest] = useState<Guest | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
 
   // Filter guests based on search term
   const filteredGuests = guests.filter(guest =>
@@ -405,6 +423,7 @@ export default function GuestHistory() {
   const handleOpenCancelDialog = (guest: Guest) => {
     setGuestToCancel(guest)
     setIsCancelDialogOpen(true)
+    setSelectedGuest(null)
   }
 
   const handleConfirmCancel = async () => {
@@ -412,6 +431,7 @@ export default function GuestHistory() {
       await handleCancelGuest(guestToCancel.guest_id)
       setIsCancelDialogOpen(false)
       setGuestToCancel(null)
+      fetchGuestHistory()
     }
   }
 
@@ -422,6 +442,25 @@ export default function GuestHistory() {
       )
     );
   };
+
+  const handleEditGuest = async (guestId: string, newName: string) => {
+    try {
+      const { error } = await supabase
+        .from('guests')
+        .update({ full_name: newName.trim() })
+        .eq('guest_id', guestId)
+
+      if (error) throw error
+
+      toast.success("Guest details updated successfully")
+      fetchGuestHistory()
+      setIsEditDialogOpen(false)
+      setEditingGuest(null)
+    } catch (error) {
+      console.error('Error updating guest:', error)
+      toast.error("Failed to update guest details")
+    }
+  }
 
   const GuestDetailsContent = ({ guest }: { guest: Guest }) => {
     const [registeredBy, setRegisteredBy] = useState<string>("");
@@ -550,7 +589,17 @@ export default function GuestHistory() {
         </div>
 
         {guest.status === 'pending' && (
-          <>
+          <div className="space-y-2">
+            <Button
+              variant="default"
+              onClick={() => {
+                setEditingGuest(guest)
+                setIsEditDialogOpen(true)
+              }}
+              className="w-full bg-blue-500 text-white hover:bg-blue-600"
+            >
+              Edit Guest
+            </Button>
             <Button
               variant="destructive"
               onClick={() => handleOpenCancelDialog(guest)}
@@ -558,44 +607,17 @@ export default function GuestHistory() {
             >
               Cancel Guest
             </Button>
-
-            <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
-              <DialogContent className="sm:max-w-[425px] bg-white">
-                <DialogHeader>
-                  <DialogTitle>Confirm Cancellation</DialogTitle>
-                  <DialogDescription>
-                    Are you sure you want to cancel {guestToCancel?.full_name}?
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="flex justify-end space-x-2">
-                  <Button variant="ghost" onClick={() => setIsCancelDialogOpen(false)}>
-                    No
-                  </Button>
-                  <Button variant="destructive" onClick={handleConfirmCancel}>
-                    Yes
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </>
+          </div>
         )}
 
         {guest.status === 'active' && (
-          <>
-            <Button
-              variant="outline"
-              onClick={() => setIsReportDialogOpen(true)}
-              className="w-full bg-yellow-500 text-white hover:bg-yellow-600"
-            >
-              Report Issue with Guest
-            </Button>
-            <ReportIssueDialog
-              guest={guest}
-              isOpen={isReportDialogOpen}
-              onOpenChange={setIsReportDialogOpen}
-              onStatusUpdate={handleStatusUpdate}
-            />
-          </>
+          <Button
+            variant="outline"
+            onClick={() => setIsReportDialogOpen(true)}
+            className="w-full bg-yellow-500 text-white hover:bg-yellow-600"
+          >
+            Report Issue with Guest
+          </Button>
         )}
       </motion.div>
     );
@@ -880,15 +902,80 @@ export default function GuestHistory() {
           onClose={() => setSelectedGuest(null)}
           onCopyId={handleCopyGuestId}
           copiedId={copiedId}
-          onCancel={handleOpenCancelDialog}
+          handleOpenCancelDialog={handleOpenCancelDialog}
           onReport={(guest) => {
             setSelectedGuestForReport(guest);
             setIsReportDialogOpen(true);
           }}
           getStatusColor={getStatusColor}
+          setEditingGuest={setEditingGuest}
+          setIsEditDialogOpen={setIsEditDialogOpen}
         />
       )}
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white">
+          <DialogHeader>
+            <DialogTitle>Edit Guest Details</DialogTitle>
+            <DialogDescription>
+              Update guest information
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Full Name</Label>
+              <Input
+                value={editingGuest?.full_name || ''}
+                onChange={(e) => setEditingGuest(prev =>
+                  prev ? { ...prev, full_name: e.target.value } : null
+                )}
+                placeholder="Enter guest's full name"
+              />
+            </div>
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsEditDialogOpen(false)
+                  setEditingGuest(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => {
+                  if (editingGuest) {
+                    handleEditGuest(editingGuest.guest_id, editingGuest.full_name)
+                  }
+                }}
+                disabled={!editingGuest || !editingGuest.full_name.trim()}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white">
+          <DialogHeader>
+            <DialogTitle>Confirm Cancellation</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to cancel {guestToCancel?.full_name}?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end space-x-2">
+            <Button variant="ghost" onClick={() => setIsCancelDialogOpen(false)}>
+              No
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmCancel}>
+              Yes
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-

@@ -212,6 +212,10 @@ export default function ProfilePage() {
                                                 src={user.avatar_url || "/default-avatar.png"}
                                                 alt={user.full_name}
                                                 className="object-cover"
+                                                width={128}
+                                                height={128}
+                                                loading="eager"
+                                                style={{ imageRendering: 'crisp-edges' }}
                                             />
                                             <AvatarFallback className="bg-[#832131] text-white text-3xl">
                                                 {user.full_name ? user.full_name[0] : '?'}

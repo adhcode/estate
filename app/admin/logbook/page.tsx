@@ -34,7 +34,10 @@ import {
     ChevronRight,
     ChartLine,
     Check,
-
+    Search,
+    LogOut,
+    ArrowDownRight,
+    AlertTriangle,
 } from "lucide-react"
 import {
     Table,
@@ -67,6 +70,7 @@ import { useSearchParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { Label } from "@/components/ui/label"
 import { Toaster } from "sonner"
+import { motion } from "framer-motion"
 
 
 
@@ -91,6 +95,7 @@ type Visit = {
     alternatePhone?: string | null;
     resolution_report: string | null;
     resolved_at: string | null;
+    notes?: string;
 }
 
 type Resident = {
@@ -204,13 +209,9 @@ const FilterIndicator = ({ selectedBlock, date, filterType }: FilterIndicatorPro
     );
 };
 
-const truncateName = (name: string) => {
-    if (!name) return '';
-    const firstName = name.split(' ')[0];
-    if (firstName.length <= 4) {
-        return `${firstName}...`;
-    }
-    return `${firstName.slice(0, 4)}...`;
+const truncateName = (name: string, length: number = 4) => {
+    if (!name) return 'N/A';
+    return name.length > length ? `${name.slice(0, length)}...` : name;
 };
 
 const formatDisplayTime = (timestamp: string | null) => {
@@ -224,10 +225,10 @@ const formatDisplayTime = (timestamp: string | null) => {
 
 const getStatusCounts = (visits: Visit[]) => {
     return {
-        all: visits.length,
         expected: visits.filter(v => v.status === 'pending').length,
-        checked_in: visits.filter(v => v.status === 'active').length,
-        checked_out: visits.filter(v => v.status === 'completed').length
+        "Checked In": visits.filter(v => v.status === 'active').length,
+        "Checked Out": visits.filter(v => v.status === 'completed').length,
+        issue: visits.filter(v => v.status === 'issue').length
     }
 }
 
@@ -405,6 +406,10 @@ const DatePickerComponent = ({ date, setDate, isDatePickerOpen, setIsDatePickerO
     return <DesktopDatePicker date={date} setDate={setDate} />;
 };
 
+interface UserMap {
+    [key: string]: string;
+}
+
 export default function VisitorLogbook() {
     const supabase = createClientComponentClient()
     const [isFilterOpen, setIsFilterOpen] = React.useState(false)
@@ -552,8 +557,13 @@ export default function VisitorLogbook() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleCheckOut(visitor.guest_id)}
-                                disabled={!visitor.check_in_time || loadingCheckOut === visitor.guest_id || visitor.status === 'cancelled'}
-                                className={`border-none ${!visitor.check_in_time || visitor.status === 'cancelled'
+                                disabled={
+                                    !visitor.check_in_time ||
+                                    loadingCheckOut === visitor.guest_id ||
+                                    visitor.status === 'cancelled' ||
+                                    visitor.status === 'issue'
+                                }
+                                className={`border-none ${(!visitor.check_in_time || visitor.status === 'cancelled' || visitor.status === 'issue')
                                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed hover:bg-gray-100'
                                     : 'bg-[#832131] text-white hover:bg-[#932131]'
                                     }`}
@@ -563,6 +573,8 @@ export default function VisitorLogbook() {
                                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                         Checking Out...
                                     </>
+                                ) : visitor.status === 'issue' ? (
+                                    'Issue Pending'
                                 ) : (
                                     'Check Out'
                                 )}
@@ -633,7 +645,7 @@ export default function VisitorLogbook() {
                         <Home className="h-5 w-5 text-gray-500" />
                         <div>
                             <p className="text-sm text-gray-500">Host</p>
-                            <p className="font-medium">{visitor.host_name}</p>
+                            <p className="font-medium">{visitor.host_name ?? 'N/A'}</p>
                         </div>
                     </div>
                 </div>
@@ -642,11 +654,9 @@ export default function VisitorLogbook() {
     )
 
     const fetchVisits = async () => {
+        setIsLoading(true);
         try {
-            setIsLoading(true);
-            console.log('Fetching visits...'); // Debug log
-
-            // First get the guests data
+            // Fetch guests
             const { data: guestsData, error: guestsError } = await supabase
                 .from('guests')
                 .select('*')
@@ -654,54 +664,57 @@ export default function VisitorLogbook() {
 
             if (guestsError) throw guestsError;
 
-            if (!guestsData?.length) {
-                setVisits([]);
-                return;
-            }
+            // Fetch household members
+            const { data: householdData, error: householdError } = await supabase
+                .from('household_members')
+                .select('id, first_name, last_name');
 
-            // Then get the users data for the host names
-            const userIds = guestsData
-                .map(guest => guest.user_id)
-                .filter(id => id) // Remove null/undefined values
-                .filter((id, index, self) => self.indexOf(id) === index); // Remove duplicates
+            if (householdError) throw householdError;
 
+            // Fetch users
             const { data: usersData, error: usersError } = await supabase
                 .from('users')
-                .select('id, full_name')
-                .in('id', userIds);
+                .select('id, full_name');
 
             if (usersError) throw usersError;
 
-            // Create a map of user IDs to names for quick lookup
-            const userMap = (usersData || []).reduce((acc, user) => {
-                acc[user.id] = user.full_name;
-                return acc;
-            }, {} as Record<string, string>);
+            console.log('Guests Data:', guestsData);
+            console.log('Household Data:', householdData);
+            console.log('Users Data:', usersData);
 
-            // Transform the data
-            const transformedVisits = guestsData.map(guest => ({
-                id: guest.id,
-                guest_id: guest.guest_id,
-                primary_resident_id: guest.user_id || '',
-                host_name: userMap[guest.user_id] || 'No Host',
-                full_name: guest.full_name || '',
-                email: guest.email || null,
-                phone_number: guest.phone_number || null,
-                check_in_time: guest.check_in_time || null,
-                check_out_time: guest.check_out_time || null,
-                duration: guest.duration || null,
-                status: guest.status || 'pending',
-                created_at: guest.created_at || new Date().toISOString(),
-                visit_date: guest.visit_date || guest.created_at || new Date().toISOString(),
-                visit_time: guest.visit_time || '',
-                purpose_of_visit: guest.purpose_of_visit || null,
-                block_number: guest.block_number || '',
-                flat_number: guest.flat_number || '',
-                resolution_report: guest.resolution_report || null,
-                resolved_at: guest.resolved_at || null
-            }));
+            const transformedVisits = guestsData.map(guest => {
+                const householdMember = householdData.find(h => h.id === guest.registered_by);
+                const user = usersData.find(u => u.id === guest.registered_by);
 
-            console.log('Transformed visits:', transformedVisits);
+                const hostFullName = householdMember
+                    ? `${householdMember.first_name} ${householdMember.last_name}`
+                    : user
+                        ? user.full_name
+                        : 'No Host';
+
+                return {
+                    id: guest.id,
+                    guest_id: guest.guest_id,
+                    primary_resident_id: guest.registered_by || '',
+                    host_name: hostFullName,
+                    full_name: guest.full_name || '',
+                    email: guest.email || null,
+                    phone_number: guest.phone_number || null,
+                    check_in_time: guest.check_in_time || null,
+                    check_out_time: guest.check_out_time || null,
+                    duration: guest.duration || null,
+                    status: guest.status || 'pending',
+                    created_at: guest.created_at || new Date().toISOString(),
+                    visit_date: guest.visit_date || guest.created_at || new Date().toISOString(),
+                    visit_time: guest.visit_time || '',
+                    purpose_of_visit: guest.purpose_of_visit || null,
+                    block_number: guest.block_number || '',
+                    flat_number: guest.flat_number || '',
+                    resolution_report: guest.resolution_report || null,
+                    resolved_at: guest.resolved_at || null
+                };
+            });
+
             setVisits(transformedVisits);
 
         } catch (error) {
@@ -719,61 +732,33 @@ export default function VisitorLogbook() {
             const now = new Date();
             const guest = visits.find(v => v.guest_id === guestId);
 
-            if (!guest) {
-                throw new Error('Guest not found');
-            }
-
-            // Update the guest record
-            const { data, error } = await supabase
+            const { error } = await supabase
                 .from('guests')
                 .update({
                     status: 'active',
                     check_in_time: now.toISOString()
                 })
-                .eq('guest_id', guestId)
-                .select()
-                .single();
+                .eq('guest_id', guestId);
 
-            if (error) {
-                console.error('Check-in error:', error);
-                throw error;
-            }
+            if (error) throw error;
 
             // Update local state
             setVisits(prev => prev.map(visit =>
                 visit.guest_id === guestId
-                    ? {
-                        ...visit,
-                        status: 'active',
-                        check_in_time: now.toISOString()
-                    }
+                    ? { ...visit, status: 'active', check_in_time: now.toISOString() }
                     : visit
             ));
-
-            // Format time for toast message
-            const formattedTime = now.toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: true
-            });
 
             toast.success(
                 <div className="flex flex-col gap-1">
                     <div className="font-medium">✅ Check-In Successful</div>
                     <div className="text-sm">
-                        You have checked in <span className="font-semibold">{guest.full_name}</span>
-                    </div>
-                    <div className="text-sm text-gray-500">
-                        Location: Block {guest.block_number}, Flat {guest.flat_number}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                        Time: {formattedTime}
+                        {guest?.full_name} has been checked in
                     </div>
                 </div>
             );
 
         } catch (error: any) {
-            console.error('Check-in failed:', error);
             toast.error(
                 <div className="flex flex-col gap-1">
                     <div className="font-medium">❌ Check-In Failed</div>
@@ -840,7 +825,7 @@ export default function VisitorLogbook() {
                         You have checked out <span className="font-semibold">{guest.full_name}</span>
                     </div>
                     <div className="text-sm text-gray-500">
-                        Location: Block {guest.block_number}, Flat {guest.flat_number}
+                        Location:  {guest.block_number}, Flat {guest.flat_number}
                     </div>
                     <div className="text-sm text-gray-500">
                         Time: {formattedTime}
@@ -882,71 +867,59 @@ export default function VisitorLogbook() {
         const counts = getStatusCounts(visits)
 
         return (
-            <div className="flex gap-4 mb-4 text-sm">
-                <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                    <span>Expected: {counts.expected}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                    <span>Checked In: {counts.checked_in}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-gray-500"></div>
-                    <span>Checked Out: {counts.checked_out}</span>
-                </div>
+            <div className="flex gap-2 text-sm">
+                <span className="px-2 py-1 rounded-lg bg-yellow-100 text-yellow-700">
+                    Expected: {counts.expected}
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-green-100 text-green-700">
+                    Checked In: {counts["Checked In"]}
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-blue-100 text-blue-700">
+                    Checked Out: {counts["Checked Out"]}
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-red-100 text-red-700">
+                    Issue: {counts.issue}
+                </span>
             </div>
         )
     }
 
     const handleResolveIssue = async (guestId: string) => {
-        setResolvingGuestId(guestId);
-        setShowResolveDialog(true);
-    };
-
-    const handleResolutionSubmit = async () => {
         try {
-            if (!resolvingGuestId || !resolutionReport.trim()) {
-                toast.error('Please write a report before resolving');
-                return;
-            }
-
-            // First update the guest status to 'active'
-            const { error: guestError } = await supabase
+            const { error } = await supabase
                 .from('guests')
                 .update({
-                    status: 'active'  // Changed from 'completed' to 'active'
+                    status: 'completed'
                 })
-                .eq('guest_id', resolvingGuestId);
+                .eq('guest_id', guestId);
 
-            if (guestError) throw guestError;
+            if (error) throw error;
 
-            // Then update the guest_issues table
-            const { error: issueError } = await supabase
-                .from('guest_issues')
-                .update({
-                    status: 'resolved',
-                    resolution_report: resolutionReport,
-                    resolved_at: new Date().toISOString()
-                })
-                .eq('guest_id', resolvingGuestId);
-
-            if (issueError) throw issueError;
-
-            // Update local state to 'active'
-            setVisits(prevVisits => prevVisits.map(visit =>
-                visit.guest_id === resolvingGuestId
-                    ? { ...visit, status: 'active' }  // Changed from 'completed' to 'active'
+            // Update local state
+            setVisits(prev => prev.map(visit =>
+                visit.guest_id === guestId
+                    ? { ...visit, status: 'completed' }
                     : visit
             ));
 
-            toast.success('Issue resolved successfully');
-            setShowResolveDialog(false);
-            setResolutionReport('');
-            setResolvingGuestId(null);
+            toast.success(
+                <div className="flex flex-col gap-1">
+                    <div className="font-medium">✅ Issue Resolved</div>
+                    <div className="text-sm">The issue has been marked as resolved</div>
+                </div>
+            );
+
+            // Close the modal
+            setShowDetailsModal(false);
+            setSelectedVisitor(null);
 
         } catch (error: any) {
-            toast.error(`Failed to resolve issue: ${error.message}`);
+            toast.error(
+                <div className="flex flex-col gap-1">
+                    <div className="font-medium">❌ Failed to resolve issue</div>
+                    <div className="text-sm">{error.message}</div>
+                </div>
+            );
         }
     };
 
@@ -972,829 +945,520 @@ export default function VisitorLogbook() {
         );
     };
 
-    return (
-        <div className="min-h-screen bg-[#FBFBFB]">
-            {isLoading ? (
-                <div className="flex items-center justify-center h-screen bg-[#FBFBFB]">
-                    <p>Loading...</p>
+    // Mobile card component with check-in/out functionality
+    const VisitorCard = ({ visit }: { visit: Visit }) => (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`rounded-lg p-4 mb-3 border border-gray-200
+                ${visit.guest_id === highlightedId ? 'bg-yellow-50/50' : 'bg-transparent'}`}
+        >
+            <div className="flex justify-between items-start mb-3">
+                <div>
+                    <h3 className="font-medium text-gray-900">{visit.full_name}</h3>
+                    <p className="text-sm text-gray-500">{visit.guest_id}</p>
                 </div>
-            ) : visits.length === 0 ? (
-                <div className="flex items-center justify-center h-screen bg-[#FBFBFB]">
-                    <p>No visits found</p>
+                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadgeStyles(visit.status)}`}>
+                    {visit.status === 'completed' ? 'Completed' :
+                        visit.status === 'active' ? 'Checked In' :
+                            visit.status === 'pending' ? 'Expected' : visit.status}
+                </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+                <div>
+                    <p className="text-gray-500">Host</p>
+                    <p className="font-medium">{truncateName(visit.host_name ?? 'N/A', 4)}</p>
+                </div>
+                <div>
+                    <p className="text-gray-500">Location</p>
+                    <p className="font-medium"> {visit.block_number}, {visit.flat_number}</p>
+                </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-gray-400" />
+                        {visit.check_in_time ? (
+                            <div className="flex items-center space-x-2">
+                                <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-medium text-gray-900">
+                                        {formatDisplayTime(visit.check_in_time)}
+                                    </span>
+                                    <span className="text-xs text-gray-500">Checked In</span>
+                                </div>
+                            </div>
+                        ) : (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleCheckIn(visit.guest_id)}
+                                disabled={loadingCheckIn === visit.guest_id || visit.status === 'cancelled'}
+                                className={`flex items-center space-x-2 h-9 px-4 rounded-md transition-colors
+                                    ${visit.status === 'cancelled'
+                                        ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                                        : 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100'
+                                    }`}
+                            >
+                                {loadingCheckIn === visit.guest_id ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Checking In...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <ArrowDownRight className="h-4 w-4" />
+                                        <span>Check In</span>
+                                    </>
+                                )}
+                            </Button>
+                        )}
+                    </div>
+                    {visit.check_out_time && (
+                        <div className="flex items-center gap-2">
+                            <LogOut className="h-4 w-4 text-gray-400" />
+                            <span className="text-red-600">{formatDisplayTime(visit.check_out_time)}</span>
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex gap-2 mt-2">
+                    {!visit.check_in_time && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCheckIn(visit.guest_id)}
+                            disabled={loadingCheckIn === visit.guest_id || visit.status === 'cancelled'}
+                            className="flex-1 border-green-200 text-green-600 hover:bg-green-50"
+                        >
+                            {loadingCheckIn === visit.guest_id ? (
+                                <>
+                                    <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                                    Checking In...
+                                </>
+                            ) : (
+                                'Check In'
+                            )}
+                        </Button>
+                    )}
+
+                    {visit.check_in_time && !visit.check_out_time && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCheckOut(visit.guest_id)}
+                            disabled={
+                                !visit.check_in_time ||
+                                loadingCheckOut === visit.guest_id ||
+                                visit.status === 'cancelled' ||
+                                visit.status === 'issue'
+                            }
+                            className={`flex-1 border-red-200 text-red-600 hover:bg-red-50 
+                                ${(!visit.check_in_time || visit.status === 'cancelled' || visit.status === 'issue')
+                                    ? 'opacity-50 cursor-not-allowed'
+                                    : ''
+                                }`}
+                        >
+                            {loadingCheckOut === visit.guest_id ? (
+                                <>
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    Out...
+                                </>
+                            ) : visit.status === 'issue' ? (
+                                'Issue Pending'
+                            ) : (
+                                'Check Out'
+                            )}
+                        </Button>
+                    )}
+
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                            setSelectedVisitor(visit);
+                            setShowDetailsModal(true);
+                        }}
+                        className="text-gray-500 hover:text-[#832131]"
+                    >
+                        Details
+                        <ArrowUpRight className="h-4 w-4 ml-1" />
+                    </Button>
+                </div>
+            </div>
+        </motion.div>
+    );
+
+    // Details Modal Component
+    const VisitorDetailsModal = ({ visitor, isOpen, onClose }: {
+        visitor: Visit | null;
+        isOpen: boolean;
+        onClose: () => void;
+    }) => {
+        if (!visitor) return null;
+
+        return (
+            <Dialog open={isOpen} onOpenChange={onClose}>
+                <DialogContent className="sm:max-w-[500px]">
+                    <DialogHeader>
+                        <DialogTitle>Visitor Details</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="flex flex-col gap-1">
+                            <h3 className="text-lg font-semibold text-gray-900">{visitor.full_name}</h3>
+                            <p className="text-sm text-gray-500">{visitor.guest_id}</p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-sm text-gray-500">Host</p>
+                                <p className="font-medium">{truncateName(visitor.host_name ?? 'N/A', 4)}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-500">Location</p>
+                                <p className="font-medium"> {visitor.block_number}, {visitor.flat_number}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-500">Check In</p>
+                                <p className="font-medium text-green-600">
+                                    {visitor.check_in_time ? formatDisplayTime(visitor.check_in_time) : 'Not checked in'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-500">Check Out</p>
+                                <p className="font-medium text-red-600">
+                                    {visitor.check_out_time ? formatDisplayTime(visitor.check_out_time) : 'Not checked out'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-500">Status</p>
+                                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium mt-1 ${getStatusBadgeStyles(visitor.status)}`}>
+                                    {visitor.status.charAt(0).toUpperCase() + visitor.status.slice(1)}
+                                </span>
+                            </div>
+                            {visitor.duration && (
+                                <div>
+                                    <p className="text-sm text-gray-500">Duration</p>
+                                    <p className="font-medium">{visitor.duration}</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {visitor.notes && (
+                            <div>
+                                <p className="text-sm text-gray-500">Notes</p>
+                                <p className="mt-1">{visitor.notes}</p>
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter className="flex gap-2">
+                        {visitor.status === 'issue' && (
+                            <Button
+                                onClick={() => handleResolveIssue(visitor.guest_id)}
+                                className="bg-green-600 text-white hover:bg-green-700"
+                            >
+                                Resolve Issue
+                            </Button>
+                        )}
+                        <Button variant="outline" onClick={onClose}>Close</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        );
+    };
+
+    return (
+        <div className="min-h-screen p-4 sm:p-6 space-y-6 max-w-[1600px] mx-auto">
+            {/* Header Section */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h1 className="text-2xl font-semibold text-gray-900">Visitor Logbook</h1>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsFilterOpen(true)}
+                        className="text-gray-600 border-gray-300"
+                    >
+                        <Filter className="h-4 w-4 mr-2" />
+                        Filters
+                    </Button>
+                    <Select value={filterType} onValueChange={setFilterType}>
+                        <SelectTrigger className="w-[140px] text-sm">
+                            <SelectValue>
+                                {filterOptions.find(option => option.id === filterType)?.label}
+                            </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {filterOptions.map(option => (
+                                <SelectItem key={option.id} value={option.id}>
+                                    {option.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+
+            {/* Search and Filter Bar */}
+            <div className="flex flex-col sm:flex-row gap-4">
+                <div className="relative flex-1">
+                    <Input
+                        type="text"
+                        placeholder="Search by name, ID, block..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-10 bg-white border-gray-300"
+                    />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                </div>
+                <div className="flex gap-3">
+                    <Select value={selectedBlock} onValueChange={setSelectedBlock}>
+                        <SelectTrigger className="w-[140px] bg-white border-gray-300">
+                            <SelectValue>
+                                {blockOptions.find(option => option.value === selectedBlock)?.label}
+                            </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {blockOptions.map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <div className="hidden sm:block">
+                        <DatePickerComponent
+                            date={date}
+                            setDate={setDate}
+                            isDatePickerOpen={isDatePickerOpen}
+                            setIsDatePickerOpen={setIsDatePickerOpen}
+                        />
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setIsDatePickerOpen(true)}
+                        className="sm:hidden bg-white border-gray-300"
+                    >
+                        <CalendarIcon className="h-4 w-4" />
+                    </Button>
+                </div>
+            </div>
+
+            {/* Active Filters */}
+            <FilterIndicator
+                selectedBlock={selectedBlock}
+                date={date}
+                filterType={filterType}
+            />
+
+            {/* Stats Overview */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {Object.entries(getStatusCounts(filteredVisitors)).map(([key, count]) => (
+                    <div
+                        key={key}
+                        className="bg-white rounded-lg p-4 shadow-sm border border-gray-100"
+                    >
+                        <div className="text-sm text-gray-500 mb-1">
+                            {key.charAt(0).toUpperCase() + key.slice(1)}
+                        </div>
+                        <div className="text-2xl font-semibold">{count}</div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Visitor Table/Cards */}
+            {isLoading ? (
+                <div className="flex items-center justify-center min-h-[400px]">
+                    <Loader2 className="h-8 w-8 animate-spin text-[#832131]" />
                 </div>
             ) : (
                 <>
-                    {/* Mobile View */}
-                    <div className="block md:hidden">
-                        {/* Search */}
-                        <div className="p-4 bg-white sticky top-0 z-10 border-b">
-                            <div className="flex gap-2">
-                                <Input
-                                    placeholder="Search..."
-                                    className="rounded-r-none"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                />
-                                <Button className="rounded-l-none bg-[#832131] hover:bg-[#932131] text-white">
-                                    Search
-                                </Button>
-                            </div>
-                        </div>
-
-                        {/* Filter Options */}
-                        <div className="px-4 pb-2">
-                            <div className="flex items-center gap-2 overflow-x-auto py-2 scrollbar-hide">
-                                <Select value={selectedBlock} onValueChange={setSelectedBlock}>
-                                    <SelectTrigger className="min-w-[120px] text-sm bg-white border-input hover:bg-gray-50 transition-colors">
-                                        <SelectValue placeholder="Block" />
-                                    </SelectTrigger>
-                                    <SelectContent className="max-h-[300px] bg-white">
-                                        {blockOptions.map(option => (
-                                            <SelectItem
-                                                key={option.value}
-                                                value={option.value}
-                                                className="cursor-pointer hover:bg-gray-50 transition-colors"
-                                            >
-                                                {option.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="min-w-[120px] h-[40px] justify-start text-left font-normal bg-white hover:bg-gray-50 transition-colors flex items-center px-3"
-                                    onClick={() => setIsDatePickerOpen(true)}
-                                >
-                                    <CalendarIcon className="h-4 w-4 mr-2" />
-                                    <span className="text-[14px] truncate">
-                                        {date ? format(date, "MMM dd, yyyy") : "Select Date"}
-                                    </span>
-                                </Button>
-
-                                <Sheet>
-                                    <SheetTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            className="min-w-[120px] h-[40px] justify-start text-left font-normal bg-white hover:bg-gray-50 transition-colors flex items-center px-3"
-                                        >
-                                            <Filter className="h-4 w-4 mr-2" />
-                                            <span className="text-[14px]">
-                                                {filterOptions.find(opt => opt.id === filterType)?.label || "Filter"}
-                                            </span>
-                                        </Button>
-                                    </SheetTrigger>
-                                    <SheetContent
-                                        side="bottom"
-                                        className="h-[40vh] bg-white border-t-2 motion-safe:animate-slide-up"
-                                    >
-                                        <SheetHeader className="mb-4">
-                                            <SheetTitle>Filter Visitors</SheetTitle>
-                                        </SheetHeader>
-                                        <div className="space-y-4 bg-white">
-                                            {filterOptions.map((option) => (
-                                                <div
-                                                    key={option.id}
-                                                    className={`p-4 rounded-lg border cursor-pointer transition-colors ${filterType === option.id
-                                                        ? 'bg-[#832131] text-white border-[#832131]'
-                                                        : 'bg-white hover:bg-gray-50'
-                                                        }`}
-                                                    onClick={() => {
-                                                        setFilterType(option.id)
-                                                    }}
-                                                >
-                                                    <div className="font-medium">{option.label}</div>
-                                                    <div className="text-sm opacity-80">
-                                                        {option.id === 'all' && 'View all visitors'}
-                                                        {option.id === 'pending' && 'Visitors not checked in'}
-                                                        {option.id === 'active' && 'Currently checked in visitors'}
-                                                        {option.id === 'completed' && 'Completed visits'}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </SheetContent>
-                                </Sheet>
-                            </div>
-
-                            {/* Active Filters Display */}
-                            {(filterType !== 'all' || selectedBlock !== 'all' || date) && (
-                                <div className="flex flex-wrap gap-2 mt-3 pb-2">
-                                    {filterType !== 'all' && (
-                                        <div className="bg-gray-100 px-3 py-1 rounded-full text-sm flex items-center gap-1">
-                                            <span>{filterOptions.find(opt => opt.id === filterType)?.label}</span>
-                                            <X
-                                                className="h-3 w-3 cursor-pointer"
-                                                onClick={() => setFilterType('all')}
-                                            />
-                                        </div>
-                                    )}
-                                    {selectedBlock !== 'all' && (
-                                        <div className="bg-gray-100 px-3 py-1 rounded-full text-sm flex items-center gap-1">
-                                            <span>{selectedBlock}</span>
-                                            <X
-                                                className="h-3 w-3 cursor-pointer"
-                                                onClick={() => setSelectedBlock('all')}
-                                            />
-                                        </div>
-                                    )}
-                                    {date && (
-                                        <div className="bg-gray-100 px-3 py-1 rounded-full text-sm flex items-center gap-1">
-                                            <span>{format(date, "MMM dd, yyyy")}</span>
-                                            <X
-                                                className="h-3 w-3 cursor-pointer"
-                                                onClick={() => setDate(undefined)}
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Visitation History */}
-                        <div className="px-4 pb-20">
-                            <div className="py-10">
-                                <div className="flex items-center gap-2">
-                                    <ChartLine className="h-5 w-5 text-[#404040]" />
-                                    <h2 className="text-[20px] font-medium text-[#404040]">
-                                        Visitation History
-                                    </h2>
-                                </div>
-                            </div>
-                            <div className="flex border-b pb-2">
-                                <div className="flex items-center gap-2 flex-1">
-                                    <User className="h-4 w-4 text-[#404040]" />
-                                    <span className="text-sm text-[#404040]">Guest Name</span>
-                                </div>
-                                <div className="flex items-center gap-2 w-24">
-                                    <FileText className="h-4 w-4 text-[#404040]" />
-                                    <span className="text-sm text-[#404040]">ID</span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-6">
-                                {filteredVisitors.map((visitor, index) => (
-                                    <MobileVisitorCard
-                                        key={index}
-                                        visitor={visitor}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Fixed Bottom Navigation */}
-                        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">1/22</span>
-                            <Button className="bg-[#832131] hover:bg-[#932131] text-white">
-                                Next
-                            </Button>
-                        </div>
-
-                        {/* Mobile Sheet */}
-                        <Sheet open={showMobileSheet} onOpenChange={setShowMobileSheet}>
-                            <SheetContent className="w-full sm:max-w-md">
-                                <SheetHeader>
-                                    <SheetTitle>Visitor Information</SheetTitle>
-                                </SheetHeader>
-                                {selectedVisitor && (
-                                    <>
-                                        <div className="py-6">
-                                            <MobileVisitorInfo visitor={selectedVisitor} />
-                                        </div>
-                                        <SheetFooter>
-                                            <Button
-                                                className="w-full bg-[#832131] hover:bg-[#932131]"
-                                                onClick={() => {
-                                                    setShowDetailsModal(true)
-                                                    setShowMobileSheet(false)
-                                                }}
-                                            >
-                                                View Details
-                                            </Button>
-                                        </SheetFooter>
-                                    </>
-                                )}
-                            </SheetContent>
-                        </Sheet>
-
-                        {/* Mobile Details Modal */}
-                        <Sheet open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-                            <SheetContent
-                                side="bottom"
-                                className="h-[80vh] bg-white border-t-2 motion-safe:animate-slide-up"
-                            >
-                                <SheetHeader className="mb-4">
-                                    <SheetTitle className="text-[#404040]">Visitor Details</SheetTitle>
-                                </SheetHeader>
-                                {selectedVisitor && (
-                                    <div className="space-y-6 bg-white overflow-y-auto">
-                                        <div className="space-y-4">
-                                            <h3 className="text-lg font-semibold text-[#832131]">
-                                                Visitor's Profile: {selectedVisitor.guest_id}
-                                            </h3>
-                                            <div className="grid gap-4">
-                                                <div className="flex gap-3">
-                                                    <User className="h-5 w-5 text-gray-500" />
-                                                    <div>
-                                                        <p className="text-sm text-gray-500">Full Name</p>
-                                                        <p className="font-medium">{selectedVisitor.full_name}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex gap-3">
-                                                    <CalendarIcon className="h-5 w-5 text-gray-500" />
-                                                    <div>
-                                                        <p className="text-sm text-gray-500">Date of Visit</p>
-                                                        <p className="font-medium">
-                                                            {format(new Date(selectedVisitor.created_at), 'MMMM d, yyyy')}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex gap-3">
-                                                    <FileText className="h-5 w-5 text-gray-500" />
-                                                    <div>
-                                                        <p className="text-sm text-gray-500">Reason for Visit</p>
-                                                        <p className="font-medium">{selectedVisitor.purpose_of_visit}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex gap-3">
-                                                    <Home className="h-5 w-5 text-gray-500" />
-                                                    <div>
-                                                        <p className="text-sm text-gray-500">Host</p>
-                                                        <p className="font-medium">{selectedVisitor.host_name}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex gap-3">
-                                                    <Building2 className="h-5 w-5 text-gray-500" />
-                                                    <div>
-                                                        <p className="text-sm text-gray-500">Block & Flat</p>
-                                                        <p className="font-medium">
-                                                            {selectedVisitor.block_number}, {selectedVisitor.flat_number}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                {selectedVisitor.check_in_time && (
-                                                    <div className="flex gap-3">
-                                                        <Clock className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Check In Time</p>
-                                                            <p className="font-medium">
-                                                                {formatDisplayTime(selectedVisitor.check_in_time)}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {selectedVisitor.check_out_time && (
-                                                    <div className="flex gap-3">
-                                                        <Clock className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Check Out Time</p>
-                                                            <p className="font-medium">
-                                                                {formatDisplayTime(selectedVisitor.check_out_time)}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {selectedVisitor.duration && (
-                                                    <div className="flex gap-3">
-                                                        <Clock className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Duration</p>
-                                                            <p className="font-medium">{selectedVisitor.duration}</p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </SheetContent>
-                        </Sheet>
-
-                        {/* Mobile Date Picker */}
-                        <MobileDatePicker
-                            date={date}
-                            setDate={setDate}
-                            isOpen={isDatePickerOpen}
-                            setIsOpen={setIsDatePickerOpen}
-                        />
-                    </div>
-
-                    {/* Desktop View */}
+                    {/* Desktop Table */}
                     <div className="hidden md:block">
-                        <div className="px-6">
-                            <div className="py-10">
-                                <div className="flex items-center gap-2">
-                                    <ChartLine className="h-5 w-5 text-[#404040]" />
-                                    <h2 className="text-[20px] font-medium text-[#404040]">
-                                        Visitation History
-                                    </h2>
-                                </div>
-                            </div>
-                            {/* Search and Filters */}
-                            <div className="flex justify-between items-center mb-6">
-                                <div className="flex-1 max-w-md">
-                                    <div className="flex">
-                                        <Input
-                                            placeholder="Search..."
-                                            className="rounded-r-none"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                        />
-                                        <Button className="rounded-l-none bg-[#832131] hover:bg-[#932131] text-white">
-                                            Search
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <Select value={selectedBlock} onValueChange={setSelectedBlock}>
-                                        <SelectTrigger className="w-[120px] bg-white border-input hover:bg-gray-50 transition-colors">
-                                            <SelectValue placeholder="Select Block" />
-                                        </SelectTrigger>
-                                        <SelectContent className="max-h-[300px] bg-white">
-                                            {blockOptions.map(option => (
-                                                <SelectItem
-                                                    key={option.value}
-                                                    value={option.value}
-                                                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                        <table className="w-full border-separate border-spacing-0">
+                            <thead className="bg-transparent">
+                                <tr className="bg-transparent">
+                                    <th className="text-left text-sm font-medium text-gray-600 pb-4 w-[18%] bg-transparent">
+                                        Guest
+                                    </th>
+                                    <th className="text-left text-sm font-medium text-gray-600 pb-4 w-[12%] bg-transparent">
+                                        Host
+                                    </th>
+                                    <th className="text-left text-sm font-medium text-gray-600 pb-4 w-[15%] bg-transparent">
+                                        Location
+                                    </th>
+                                    <th className="text-left text-sm font-medium text-gray-600 pb-4 w-[15%] bg-transparent">
+                                        Check In
+                                    </th>
+                                    <th className="text-left text-sm font-medium text-gray-600 pb-4 w-[15%] bg-transparent">
+                                        Check Out
+                                    </th>
+                                    <th className="text-left text-sm font-medium text-gray-600 pb-4 w-[12%] bg-transparent">
+                                        Status
+                                    </th>
+                                    <th className="text-right text-sm font-medium text-gray-600 pb-4 w-[13%] bg-transparent">
+                                        Actions
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-transparent">
+                                {filteredVisitors.map((visitor) => (
+                                    <tr
+                                        key={visitor.id}
+                                        className={`group bg-transparent
+                                            ${visitor.guest_id === highlightedId ? 'bg-yellow-50/50' : 'hover:bg-gray-50/50'}`}
+                                    >
+                                        <td className="py-4 bg-transparent">
+                                            <div className="flex flex-col">
+                                                <span className="font-medium text-gray-900">
+                                                    {truncateName(visitor.full_name, 4)}
+                                                </span>
+                                                <span className="text-xs text-gray-500">{visitor.guest_id}</span>
+                                            </div>
+                                        </td>
+                                        <td className="py-4 bg-transparent">
+                                            <span className="text-gray-600">
+                                                {truncateName(visitor.host_name ?? 'N/A', 4)}
+                                            </span>
+                                        </td>
+                                        <td className="py-4 bg-transparent">
+                                            <span className="text-gray-600">
+                                                {visitor.block_number}, {visitor.flat_number}
+                                            </span>
+                                        </td>
+                                        <td className="py-4 bg-transparent">
+                                            {visitor.check_in_time ? (
+                                                <div className="flex items-center space-x-2">
+                                                    <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm font-medium text-gray-900">
+                                                            {formatDisplayTime(visitor.check_in_time)}
+                                                        </span>
+                                                        <span className="text-xs text-gray-500">Checked In</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleCheckIn(visitor.guest_id)}
+                                                    disabled={loadingCheckIn === visitor.guest_id || visitor.status === 'cancelled'}
+                                                    className={`flex items-center space-x-2 h-9 px-4 rounded-md transition-colors
+                                                        ${visitor.status === 'cancelled'
+                                                            ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                                                            : 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100'
+                                                        }`}
                                                 >
-                                                    {option.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-[120px] h-[40px] justify-start text-left font-normal bg-white hover:bg-gray-50 transition-colors flex items-center px-3"
-                                        onClick={() => setIsDatePickerOpen(true)}
-                                    >
-                                        <CalendarIcon className="h-4 w-4 mr-2" />
-                                        <span className="text-[14px]">
-                                            {date ? format(date, "MMM dd, yyyy") : "Today"}
-                                        </span>
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => setIsFilterOpen(!isFilterOpen)}
-                                        className="w-[120px] h-[40px] justify-start text-left font-normal bg-white hover:bg-gray-50 transition-colors flex items-center px-3"
-                                    >
-                                        <Filter className="h-4 w-4 mr-2" />
-                                        <span className="text-[14px]">Filter</span>
-                                    </Button>
-                                </div>
-                            </div>
-
-                            {/* Filter Options */}
-                            {isFilterOpen && (
-                                <div className="bg-[#FBFBFB] p-4 rounded-md shadow-md mb-6">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Filter className="h-4 w-4" />
-                                        <span className="text-base font-medium">FILTER</span>
-                                    </div>
-                                    <div className="flex gap-4">
-                                        {filterOptions.map((option) => (
-                                            <label
-                                                key={option.id}
-                                                className="flex items-center space-x-2 cursor-pointer"
-                                            >
-                                                <Checkbox
-                                                    id={option.id}
-                                                    checked={filterType === option.id}
-                                                    onCheckedChange={() => setFilterType(option.id)}
-                                                />
-                                                <span className="text-sm font-medium">
-                                                    {option.label}
-                                                </span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Visitation History Table */}
-                            <Table className="bg-transparent [&_tr]:border-0">
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <User className="h-4 w-4 text-[#404040]" />
-                                                Guest Name
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <User className="h-4 w-4 text-[#404040]" />
-                                                Host
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <FileText className="h-4 w-4 text-[#404040]" />
-                                                ID
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <Building2 className="h-4 w-4 text-[#404040]" />
-                                                Block
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <Home className="h-4 w-4 text-[#404040]" />
-                                                Flat
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <Clock className="h-4 w-4 text-[#404040]" />
-                                                Check In
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <Clock className="h-4 w-4 text-[#404040]" />
-                                                Check Out
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <Clock className="h-4 w-4 text-[#404040]" />
-                                                Duration
-                                            </div>
-                                        </TableHead>
-                                        <TableHead className="text-[14px] text-[#404040] whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <FileText className="h-4 w-4 text-[#404040]" />
-                                                Status
-                                            </div>
-                                        </TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody className="bg-transparent">
-                                    {filteredVisitors.map((visit) => (
-                                        <TableRow
-                                            key={visit.id}
-                                            className={`
-                                                transition-all duration-200 hover:bg-gray-50
-                                                ${visit.status === 'completed' ? 'bg-gray-50/50' :  // Changed from 'checked_out'
-                                                    visit.status === 'active' ? 'bg-green-50/50' : ''  // Changed from 'checked_in'
-                                                }
-                                                ${visit.guest_id === highlightedId ? 'bg-yellow-100 animate-pulse' : ''}
-                                                h-20 border-0
-                                            `}
-                                        >
-                                            <TableCell
+                                                    {loadingCheckIn === visitor.guest_id ? (
+                                                        <>
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            <span>Checking In...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <ArrowDownRight className="h-4 w-4" />
+                                                            <span>Check In</span>
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            )}
+                                        </td>
+                                        <td className="py-4 bg-transparent">
+                                            {visitor.check_out_time ? (
+                                                <div className="flex items-center space-x-2">
+                                                    <div className="h-2 w-2 rounded-full bg-red-500"></div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm font-medium text-gray-900">
+                                                            {formatDisplayTime(visitor.check_out_time)}
+                                                        </span>
+                                                        <span className="text-xs text-gray-500">Checked Out</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleCheckOut(visitor.guest_id)}
+                                                    disabled={
+                                                        !visitor.check_in_time ||
+                                                        loadingCheckOut === visitor.guest_id ||
+                                                        visitor.status === 'cancelled' ||
+                                                        visitor.status === 'issue'
+                                                    }
+                                                    className={`flex items-center space-x-2 h-9 px-4 rounded-md transition-colors
+                                                        ${(!visitor.check_in_time || visitor.status === 'cancelled' || visitor.status === 'issue')
+                                                            ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                                                            : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                                                        }`}
+                                                >
+                                                    {loadingCheckOut === visitor.guest_id ? (
+                                                        <>
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            <span>Checking Out...</span>
+                                                        </>
+                                                    ) : visitor.status === 'issue' ? (
+                                                        <>
+                                                            <AlertTriangle className="h-4 w-4" />
+                                                            <span>Issue Pending</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <ArrowUpRight className="h-4 w-4" />
+                                                            <span>Check Out</span>
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            )}
+                                        </td>
+                                        <td className="py-4 bg-transparent">
+                                            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadgeStyles(visitor.status)}`}>
+                                                {visitor.status.charAt(0).toUpperCase() + visitor.status.slice(1)}
+                                            </span>
+                                        </td>
+                                        <td className="py-4 text-right bg-transparent">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
                                                 onClick={() => {
-                                                    setSelectedVisitor(visit);
-                                                    setShowMobileSheet(true);
-                                                }}
-                                                className="cursor-pointer hover:text-[#832131] transition-colors"
-                                            >
-                                                <span className="font-medium text-[#333333] text-[14px]">
-                                                    {truncateName(visit.full_name)}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell
-                                                onClick={() => {
-                                                    setSelectedVisitor(visit);
+                                                    setSelectedVisitor(visitor);
                                                     setShowDetailsModal(true);
                                                 }}
-                                                className="cursor-pointer hover:text-[#832131] transition-colors"
+                                                className="text-gray-500 hover:text-[#832131] opacity-0 group-hover:opacity-100 transition-opacity"
                                             >
-                                                <span className="text-[#828282] text-[14px]">
-                                                    {truncateName(visit.host_name || '')}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell className="text-[#828282] text-[14px]">
-                                                {visit.guest_id}
-                                            </TableCell>
-                                            <TableCell className="text-[#828282] text-[14px]">
-                                                {visit.block_number}
-                                            </TableCell>
-                                            <TableCell className="text-[#828282] text-[14px]">
-                                                {visit.flat_number}
-                                            </TableCell>
-                                            <TableCell>
-                                                {visit.check_in_time ? (
-                                                    <div className="flex flex-col">
-                                                        <span className="text-green-600 font-medium text-[14px]">
-                                                            {formatDisplayTime(visit.check_in_time)}
-                                                        </span>
-                                                        <span className="text-[#828282] text-[14px]">Checked In</span>
-                                                    </div>
-                                                ) : (
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={(e) => {
-                                                            e.preventDefault()
-                                                            e.stopPropagation()
-                                                            console.log('Check-in button clicked for:', visit.guest_id)
-                                                            handleCheckIn(visit.guest_id)
-                                                        }}
-                                                        disabled={loadingCheckIn === visit.guest_id || visit.status === 'cancelled'}
-                                                        className={`border-none ${visit.status === 'cancelled'
-                                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed hover:bg-gray-100'
-                                                            : 'bg-[#832131] text-white hover:bg-[#932131]'
-                                                            }`}
-                                                    >
-                                                        {loadingCheckIn === visit.guest_id ? (
-                                                            <>
-                                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                                Checking In...
-                                                            </>
-                                                        ) : (
-                                                            'Check In'
-                                                        )}
-                                                    </Button>
-                                                )}
-                                            </TableCell>
-                                            <TableCell>
-                                                {visit.status === 'issue' ? (
-                                                    <div className="flex flex-col gap-2">
-                                                        {renderResolveButton(visit)}
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            disabled={true}
-                                                            className="bg-gray-200 text-gray-400 cursor-not-allowed hover:bg-gray-200 border-none"
-                                                        >
-                                                            Check Out
-                                                        </Button>
-                                                    </div>
-                                                ) : visit.check_out_time ? (
-                                                    <div className="flex flex-col">
-                                                        <span className="text-red-600 font-medium text-[14px]">
-                                                            {formatDisplayTime(visit.check_out_time)}
-                                                        </span>
-                                                        <span className="text-[#828282] text-[14px]">Checked Out</span>
-                                                    </div>
-                                                ) : (
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={() => handleCheckOut(visit.guest_id)}
-                                                        disabled={
-                                                            !visit.check_in_time ||
-                                                            loadingCheckOut === visit.guest_id ||
-                                                            visit.status === 'issue' as Visit['status'] ||
-                                                            visit.status === 'cancelled'
-                                                        }
-                                                        className={`border-none ${!visit.check_in_time || visit.status === 'issue' as Visit['status'] || visit.status === 'cancelled'
-                                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed hover:bg-gray-100'
-                                                            : 'bg-[#832131] text-white hover:bg-[#932131]'
-                                                            }`}
-                                                    >
-                                                        {loadingCheckOut === visit.guest_id ? (
-                                                            <>
-                                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                                Checking Out...
-                                                            </>
-                                                        ) : (
-                                                            'Check Out'
-                                                        )}
-                                                    </Button>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-[#828282] text-[14px]">
-                                                {visit.check_out_time ? (
-                                                    <span className="font-medium text-[14px]">{visit.duration}</span>
-                                                ) : visit.check_in_time ? (
-                                                    <span className="font-medium text-[14px]">Ongoing</span>
-                                                ) : (
-                                                    <span className="font-medium text-[14px]">Not started</span>
-                                                )}
-                                            </TableCell>
-                                            <TableCell>
-                                                <span className={`
-                                                    px-2.5 py-1 rounded-full text-xs font-medium
-                                                    ${getStatusBadgeStyles(visit.status)}
-                                                `}>
-                                                    {visit.status === 'completed' ? 'Completed' :
-                                                        visit.status === 'active' ? 'Checked In' :
-                                                            visit.status === 'pending' ? 'Expected' :
-                                                                visit.status === 'cancelled' ? 'Cancelled' :
-                                                                    visit.status === 'issue' ? 'Issue' : 'Pending'}
-                                                </span>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
+                                                View
+                                                <ArrowUpRight className="h-4 w-4 ml-1" />
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
 
-                            {/* Desktop Details Modal */}
-                            <Sheet open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-                                <SheetContent
-                                    side="bottom"
-                                    className="h-[80vh] bg-white border-t-2 motion-safe:animate-slide-up"
-                                >
-                                    <SheetHeader className="mb-4">
-                                        <SheetTitle className="text-[#404040]">Visitor Details</SheetTitle>
-                                    </SheetHeader>
-                                    {selectedVisitor && (
-                                        <div className="space-y-6 bg-white overflow-y-auto">
-                                            <div className="space-y-4">
-                                                <h3 className="text-lg font-semibold text-[#832131]">
-                                                    Visitor's Profile: {selectedVisitor.guest_id}
-                                                </h3>
-                                                <div className="grid gap-4">
-                                                    <div className="flex gap-3">
-                                                        <User className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Full Name</p>
-                                                            <p className="font-medium">{selectedVisitor.full_name}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex gap-3">
-                                                        <CalendarIcon className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Date of Visit</p>
-                                                            <p className="font-medium">
-                                                                {format(new Date(selectedVisitor.created_at), 'MMMM d, yyyy')}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex gap-3">
-                                                        <FileText className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Reason for Visit</p>
-                                                            <p className="font-medium">{selectedVisitor.purpose_of_visit}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex gap-3">
-                                                        <Home className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Host</p>
-                                                            <p className="font-medium">{selectedVisitor.host_name}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex gap-3">
-                                                        <Building2 className="h-5 w-5 text-gray-500" />
-                                                        <div>
-                                                            <p className="text-sm text-gray-500">Block & Flat</p>
-                                                            <p className="font-medium">
-                                                                {selectedVisitor.block_number}, {selectedVisitor.flat_number}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    {selectedVisitor.check_in_time && (
-                                                        <div className="flex gap-3">
-                                                            <Clock className="h-5 w-5 text-gray-500" />
-                                                            <div>
-                                                                <p className="text-sm text-gray-500">Check In Time</p>
-                                                                <p className="font-medium">
-                                                                    {formatDisplayTime(selectedVisitor.check_in_time)}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {selectedVisitor.check_out_time && (
-                                                        <div className="flex gap-3">
-                                                            <Clock className="h-5 w-5 text-gray-500" />
-                                                            <div>
-                                                                <p className="text-sm text-gray-500">Check Out Time</p>
-                                                                <p className="font-medium">
-                                                                    {formatDisplayTime(selectedVisitor.check_out_time)}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {selectedVisitor.duration && (
-                                                        <div className="flex gap-3">
-                                                            <Clock className="h-5 w-5 text-gray-500" />
-                                                            <div>
-                                                                <p className="text-sm text-gray-500">Duration</p>
-                                                                <p className="font-medium">{selectedVisitor.duration}</p>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </SheetContent>
-                            </Sheet>
-
-                            {/* Pagination */}
-                            <div className="flex justify-between items-center mt-6">
-                                <span className="text-sm text-muted-foreground">1/23</span>
-                                <Button className="bg-[#832131] hover:bg-[#932131] text-white">
-                                    Next
-                                </Button>
-                            </div>
-                        </div>
+                    {/* Mobile Cards */}
+                    <div className="md:hidden space-y-4">
+                        {filteredVisitors.map((visitor) => (
+                            <VisitorCard key={visitor.id} visit={visitor} />
+                        ))}
                     </div>
                 </>
             )}
-            <Dialog open={showResolveDialog} onOpenChange={setShowResolveDialog}>
-                <DialogContent className="sm:max-w-[600px] bg-white p-0 gap-0">
-                    {/* Header Section */}
-                    <div className="px-8 py-6">
-                        <DialogHeader>
-                            <DialogTitle className="text-2xl font-semibold text-[#832131]">
-                                Issue Resolution Report
-                            </DialogTitle>
-                            <p className="text-gray-500 mt-2">
-                                Document the steps taken to resolve this guest issue
-                            </p>
-                        </DialogHeader>
-                    </div>
 
-                    {/* Content Section */}
-                    <div className="px-8 py-6">
-                        {/* Guest Info Card */}
-                        <div className="bg-gray-50 rounded-xl p-5 mb-6 border border-gray-100">
-                            <h3 className="text-sm font-medium text-gray-500 mb-3">ISSUE DETAILS</h3>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <p className="text-sm text-gray-500">Guest Name</p>
-                                    <p className="font-medium">
-                                        {visits.find(v => v.guest_id === resolvingGuestId)?.full_name}
-                                    </p>
-                                </div>
-                                <div className="space-y-1">
-                                    <p className="text-sm text-gray-500">Guest ID</p>
-                                    <p className="font-medium">{resolvingGuestId}</p>
-                                </div>
-                                <div className="space-y-1">
-                                    <p className="text-sm text-gray-500">Report Date</p>
-                                    <p className="font-medium">
-                                        {new Date().toLocaleDateString('en-US', {
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric'
-                                        })}
-                                    </p>
-                                </div>
-                                <div className="space-y-1">
-                                    <p className="text-sm text-gray-500">Report Time</p>
-                                    <p className="font-medium">
-                                        {new Date().toLocaleTimeString('en-US', {
-                                            hour: '2-digit',
-                                            minute: '2-digit'
-                                        })}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
+            {/* Details Modal */}
+            <VisitorDetailsModal
+                visitor={selectedVisitor}
+                isOpen={showDetailsModal}
+                onClose={() => {
+                    setShowDetailsModal(false);
+                    setSelectedVisitor(null);
+                }}
+            />
 
-                        {/* Report Input Section */}
-                        <div className="space-y-4">
-                            <div>
-                                <Label className="text-sm font-medium text-gray-500">
-                                    RESOLUTION REPORT
-                                </Label>
-                                <p className="text-sm text-gray-500 mt-1">
-                                    Please provide a detailed description of how the issue was resolved
-                                </p>
-                            </div>
-                            <Textarea
-                                placeholder="Enter your report here..."
-                                value={resolutionReport}
-                                onChange={(e) => setResolutionReport(e.target.value)}
-                                className="min-h-[180px] resize-none border border-gray-200 rounded-xl
-                                         focus:ring-0 focus:border-[#832131] text-base outline-none
-                                         focus-visible:ring-0 focus-visible:ring-offset-0"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Footer Section */}
-                    <div className="bg-gray-50 px-8 py-5 border-t border-gray-100">
-                        <div className="flex justify-end gap-3">
-                            <Button
-                                variant="outline"
-                                onClick={() => {
-                                    setShowResolveDialog(false);
-                                    setResolutionReport('');
-                                    setResolvingGuestId(null);
-                                }}
-                                className="border-gray-300 hover:bg-white/50 text-gray-600 font-medium"
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={handleResolutionSubmit}
-                                disabled={!resolutionReport.trim()}
-                                className="bg-[#832131] hover:bg-[#932131] text-white px-8 py-2 h-10
-                                         font-medium flex items-center gap-2 disabled:opacity-50"
-                            >
-                                {resolutionReport.trim() ? (
-                                    <>
-                                        <FileText className="h-4 w-4" />
-                                        Submit Report
-                                    </>
-                                ) : (
-                                    'Write Report to Submit'
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-            <Toaster />
+            {/* Add Toaster component */}
+            <Toaster position="top-right" />
         </div>
     )
 }

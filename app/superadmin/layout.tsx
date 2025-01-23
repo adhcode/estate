@@ -1,60 +1,72 @@
-import { ReactNode } from 'react'
-import Link from 'next/link'
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "@/components/ui/sidebar"
-import { Home, Users, Settings, BarChart, FileText, Bell } from 'lucide-react'
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { DM_Sans } from "next/font/google"
+import dynamic from 'next/dynamic'
 
-function SuperAdminSidebar() {
-  return (
-    <Sidebar>
-      <SidebarHeader>
-        <Link href="/superadmin">Super Admin</Link>
-      </SidebarHeader>
-      <SidebarContent>
-        <SidebarMenu>
-          <SidebarMenuItem
-            href="/superadmin/dashboard"
-            icon={<Home className="mr-2 h-4 w-4" />}
-          >
-            <SidebarMenuButton asChild>
-              <Link href="/superadmin/dashboard">
-                <Home className="mr-2 h-4 w-4" />
-                Dashboard
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem href="/superadmin/users" icon={<Users size={20} />}>Users</SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarContent>
-    </Sidebar>
-  );
+const SuperAdminUI = dynamic(
+  () => import('../super-admin/components/SuperAdminUI').then(mod => ({ default: mod.SuperAdminUI })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-screen bg-white">
+        <main className="flex-1">
+          <div className="container mx-auto p-4 md:p-6" />
+        </main>
+      </div>
+    )
+  }
+)
+
+const dmSans = DM_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+  display: 'swap',
+  preload: true,
+})
+
+export const metadata = {
+  title: 'Facility Management - LKJ Estate',
+  description: 'Facility Management Dashboard for LKJ Estate',
 }
 
 export default async function SuperAdminLayout({
-  children
+  children,
 }: {
-  children: ReactNode
+  children: React.ReactNode
 }) {
-  const supabase = createServerComponentClient({ cookies });
+  const cookieStore = cookies()
+  const supabase = createServerComponentClient({
+    cookies: () => cookieStore,
+  })
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  try {
+    const { data: { session }, error: authError } = await supabase.auth.getSession()
 
-  if (!session) {
-    redirect('/auth/signin');
+    if (authError || !session) {
+      return redirect('/auth/login')
+    }
+
+    const { data: superAdminData, error: superAdminError } = await supabase
+      .from('super_admins')
+      .select('role')
+      .eq('email', session.user.email)
+      .single()
+
+    if (superAdminError || !superAdminData) {
+      return redirect('/auth/login')
+    }
+
+    return (
+      <div className={dmSans.className}>
+        <SuperAdminUI session={session}>
+          {children}
+        </SuperAdminUI>
+      </div>
+    )
+
+  } catch (error) {
+    console.error('Super Admin layout error:', error)
+    return redirect('/auth/login')
   }
-
-  return (
-    <div className="flex h-screen">
-      <SuperAdminSidebar />
-      <main className="flex-1 overflow-y-auto">
-        {children}
-      </main>
-    </div>
-  );
 }

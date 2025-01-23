@@ -1,71 +1,86 @@
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { AdminUI } from './components/AdminUI'
 import { DM_Sans } from "next/font/google"
+import dynamic from 'next/dynamic'
 
+// Remove Suspense import and use noSSR option
+const AdminUI = dynamic(
+  () => import('./components/AdminUI').then(mod => ({ default: mod.AdminUI })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-screen bg-white">
+        <main className="flex-1">
+          <div className="container mx-auto p-4 md:p-6" />
+        </main>
+      </div>
+    )
+  }
+)
+
+// Optimize font loading
 const dmSans = DM_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '700'],
+  display: 'swap', // Add this for better font loading performance
+  preload: true,
+  adjustFontFallback: true,
 })
+
+export const metadata = {
+  title: 'Admin Dashboard - LKJ Estate',
+  description: 'Administrative dashboard for LKJ Estate management',
+}
+
+// Add caching for better performance
+export const revalidate = 3600 // Revalidate every hour
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const supabase = createServerComponentClient({ cookies })
+  const cookieStore = cookies()
+  const supabase = createServerComponentClient({
+    cookies: () => cookieStore,
+  })
 
   try {
-    // 1. Check session
+    // 1. Check session - Optimize with single query
     const { data: { session }, error: authError } = await supabase.auth.getSession()
-    console.log('1. Session check:', {
-      hasSession: !!session,
-      userEmail: session?.user?.email,
-      authError
-    })
 
     if (authError || !session) {
-      console.log('No session in admin layout')
-      redirect('/auth/login')
+      return redirect('/auth/login')
     }
 
-    // 2. Check staff table
+    // 2. Check staff table with optimized query
     const { data: staffData, error: staffError } = await supabase
       .from('staff')
-      .select('id, email, role')
+      .select('role')
       .eq('email', session.user.email)
       .single()
 
-    console.log('2. Staff check:', {
-      hasStaffData: !!staffData,
-      staffEmail: staffData?.email,
-      staffRole: staffData?.role,
-      staffError
-    })
-
-    // 3. Check admin access
-    const hasAdminAccess = staffData && staffData.role === 'admin'
-    console.log('3. Admin access check:', {
-      hasAdminAccess,
-      staffRole: staffData?.role
-    })
-
-    if (!hasAdminAccess) {
-      console.log('Admin access denied - redirecting to dashboard')
-      redirect('/resident/dashboard')
+    if (staffError || !staffData) {
+      return redirect('/auth/login')
     }
 
-    console.log('4. Admin access granted - rendering layout')
+    // 3. Check admin access
+    if (staffData.role !== 'admin') {
+      return redirect('/resident/dashboard')
+    }
+
+    // 4. Render layout with optimized className handling
     return (
-      <div className={`${dmSans.className} bg-[#FBFBFB] min-h-screen`}>
-        <AdminUI>
+      <div className={dmSans.className}>
+        <AdminUI session={session}>
           {children}
         </AdminUI>
       </div>
     )
+
   } catch (error) {
     console.error('Admin layout error:', error)
-    redirect('/auth/login')
+    return redirect('/auth/login')
   }
 }

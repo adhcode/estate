@@ -13,26 +13,19 @@ import {
     DialogTitle,
     DialogHeader,
 } from "@/components/ui/dialog"
-import { Menu, X, Home, UserPlus, Clock, Users, User, LogOut, User2 } from "lucide-react"
+import { Menu, X, Home, UserPlus, Clock, Users, User, LogOut, User2, MessageSquare, CreditCard } from "lucide-react"
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { Sheet, SheetContent, SheetHeader, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 
-type NavbarProps = {
-    name: string;
-    avatar_url?: string;
+interface NavbarProps {
+    name: string
+    avatar_url?: string
+    children?: React.ReactNode
 }
 
-const navigation = [
-    { name: 'Dashboard', href: '/resident/dashboard', icon: Home },
-    { name: 'Register Visitor', href: '/resident/register-visitor', icon: UserPlus },
-    { name: 'Guest History', href: '/resident/guest-history', icon: Clock },
-    { name: 'Household Members', href: '/resident/household-members', icon: Users },
-    { name: 'Profile', href: '/resident/profile', icon: User },
-]
-
-export function Navbar({ name, avatar_url }: NavbarProps) {
+export function Navbar({ name, avatar_url, children }: NavbarProps) {
     const router = useRouter()
     const supabase = createClientComponentClient()
     const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false)
@@ -42,6 +35,17 @@ export function Navbar({ name, avatar_url }: NavbarProps) {
     const [userRole, setUserRole] = useState<string>("");
     const [userData, setUserData] = useState<any>(null);
     const pathname = usePathname();
+    const [unreadCount, setUnreadCount] = useState(0)
+
+    const navigation = [
+        { name: 'Dashboard', href: '/resident/dashboard', icon: Home },
+        ...(userRole === 'resident' ? [
+            { name: 'Messages', href: '/resident/messages', icon: MessageSquare },
+            { name: 'Payments', href: '/resident/payments', icon: CreditCard }
+        ] : []),
+        { name: 'Household Members', href: '/resident/household-members', icon: Users },
+        { name: 'Profile', href: '/resident/profile', icon: User },
+    ]
 
     useEffect(() => {
         const fetchUserData = async () => {
@@ -86,6 +90,48 @@ export function Navbar({ name, avatar_url }: NavbarProps) {
         fetchUserData();
     }, [supabase]);
 
+    useEffect(() => {
+        const fetchUnreadCount = async () => {
+            try {
+                const { data: { user } } = await supabase.auth.getUser()
+                if (!user) return
+
+                const { count, error } = await supabase
+                    .from('messages')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('recipient_id', user.id)
+                    .eq('is_read', false)
+
+                if (error) throw error
+                setUnreadCount(count || 0)
+            } catch (error) {
+                console.error('Error fetching unread count:', error)
+            }
+        }
+
+        fetchUnreadCount()
+
+        // Set up real-time subscription
+        const channel = supabase
+            .channel('messages')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages'
+                },
+                () => {
+                    fetchUnreadCount()
+                }
+            )
+            .subscribe()
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
+    }, [supabase])
+
     const handleLogout = async () => {
         try {
             await supabase.auth.signOut()
@@ -125,123 +171,145 @@ export function Navbar({ name, avatar_url }: NavbarProps) {
     }
 
     return (
-        <header className="w-full py-4 px-6 flex justify-between items-center bg-white shadow-md sticky top-0 z-50 font-montserrat">
-            <Link href="/resident/dashboard" className="flex items-center space-x-2">
-                <h1 className="text-2xl font-bold text-[#832131]">LKJ Estate</h1>
-            </Link>
+        <header className="sticky top-0 z-40 w-full bg-white border-b border-gray-200 shadow-sm">
+            <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
+                {children}
 
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center space-x-6">
-                {navigation.map((item) => (
-                    <Link
-                        key={item.name}
-                        href={item.href}
-                        className={cn(
-                            "flex items-center gap-x-2 text-sm transition-colors duration-200",
-                            "hover:text-[#832131]",
-                            pathname === item.href ? "text-[#832131] font-medium" : "text-gray-600"
-                        )}
-                    >
-                        <item.icon className="h-4 w-4" />
-                        {item.name}
-                    </Link>
-                ))}
-                <Button
-                    variant="ghost"
-                    className="flex items-center gap-x-2 text-sm hover:text-[#832131] transition-colors duration-200"
-                    onClick={() => setShowLogoutConfirmation(true)}
-                >
-                    <LogOut className="h-4 w-4" />
-                    Sign out
-                </Button>
-            </nav>
+                <Link href="/resident/dashboard" className="flex items-center space-x-2">
+                    <h1 className="text-2xl font-bold text-[#832131]">LKJ Gardens</h1>
+                </Link>
 
-            {/* Mobile Navigation */}
-            <Sheet open={isOpen} onOpenChange={setIsOpen}>
-                <SheetTrigger asChild>
-                    <Button variant="ghost" size="icon" className="md:hidden">
-                        <Menu className="h-6 w-6" />
-                        <VisuallyHidden>Open navigation menu</VisuallyHidden>
-                    </Button>
-                </SheetTrigger>
-                <SheetContent
-                    className="w-[300px] sm:w-[400px] transition-transform duration-300"
-                    side="right"
-                >
-                    <SheetHeader>
-                        <SheetTitle></SheetTitle>
-                        <SheetDescription>
-
-                        </SheetDescription>
-                    </SheetHeader>
-                    <div className="flex flex-col h-full">
-                        {/* Profile Section */}
-                        <SheetHeader className="pb-8 border-b">
-                            <div className="space-y-6">
-                                <Avatar className="h-20 w-20 mx-auto">
-                                    <AvatarImage
-                                        src={userData?.avatar_url || ""}
-                                        alt={fullName}
-                                        className="object-cover"
-                                    />
-                                    <AvatarFallback>
-                                        <User2 className="h-10 w-10" />
-                                    </AvatarFallback>
-                                </Avatar>
-
-                                <div className="flex flex-col space-y-1.5 items-center">
-                                    <p className="text-base font-semibold">{fullName}</p>
-                                    <p className="text-sm text-muted-foreground">
-                                        {userRole === 'resident' ? 'Resident' : 'Household Member'}
-                                    </p>
-                                </div>
+                {/* Desktop Navigation */}
+                <nav className="hidden md:flex items-center space-x-6">
+                    {navigation.map((item) => (
+                        <Link
+                            key={item.name}
+                            href={item.href}
+                            className={cn(
+                                "flex items-center gap-x-2 text-sm transition-colors duration-200",
+                                "hover:text-[#832131]",
+                                pathname === item.href ? "text-[#832131] font-medium" : "text-gray-600"
+                            )}
+                        >
+                            <div className="relative">
+                                <item.icon className="h-4 w-4" />
+                                {item.name === 'Messages' && unreadCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#832131] text-[10px] text-white">
+                                        {unreadCount}
+                                    </span>
+                                )}
                             </div>
+                            {item.name}
+                        </Link>
+                    ))}
+                    <Button
+                        variant="ghost"
+                        className="flex items-center gap-x-2 text-sm hover:text-[#832131] transition-colors duration-200"
+                        onClick={() => setShowLogoutConfirmation(true)}
+                    >
+                        <LogOut className="h-4 w-4" />
+                        Sign out
+                    </Button>
+                </nav>
+
+                {/* Mobile Menu Button */}
+                <Sheet open={isOpen} onOpenChange={setIsOpen}>
+                    <SheetTrigger asChild>
+                        <Button variant="ghost" size="icon" className="md:hidden">
+                            <Menu className="h-6 w-6" />
+                            <VisuallyHidden>Open navigation menu</VisuallyHidden>
+                        </Button>
+                    </SheetTrigger>
+                    <SheetContent
+                        className="w-[300px] sm:w-[400px] transition-transform duration-300"
+                        side="right"
+                    >
+                        <SheetHeader>
+                            <SheetTitle></SheetTitle>
+                            <SheetDescription>
+
+                            </SheetDescription>
                         </SheetHeader>
+                        <div className="flex flex-col h-full">
+                            {/* Profile Section */}
+                            <SheetHeader className="pb-8 border-b">
+                                <div className="space-y-6">
+                                    <Avatar className="h-20 w-20 mx-auto">
+                                        <AvatarImage
+                                            src={userData?.avatar_url || ""}
+                                            alt={fullName}
+                                            className="object-cover"
+                                            width={80}
+                                            height={80}
+                                            loading="eager"
+                                            style={{ imageRendering: 'crisp-edges' }}
+                                        />
+                                        <AvatarFallback>
+                                            <User2 className="h-10 w-10" />
+                                        </AvatarFallback>
+                                    </Avatar>
 
-                        {/* Navigation Items */}
-                        <div className="flex-1 py-6 space-y-4">
-                            <nav className="space-y-2">
-                                {navigation.map((item) => (
-                                    <button
-                                        key={item.name}
-                                        onClick={() => handleNavigation(item.href, item.name)}
-                                        className={cn(
-                                            "flex w-full items-center gap-x-3 px-4 py-3 text-sm rounded-lg",
-                                            "transition-all duration-200 ease-in-out",
-                                            "hover:bg-accent/80 hover:translate-x-1",
-                                            pathname === item.href && "bg-accent",
-                                            activeItem === item.name && "bg-accent/90 translate-x-2",
-                                        )}
-                                    >
-                                        <item.icon className={cn(
-                                            "h-5 w-5 transition-transform duration-200",
-                                            activeItem === item.name && "scale-110"
-                                        )} />
-                                        <span className={cn(
-                                            "transition-colors duration-200",
-                                            activeItem === item.name && "font-medium"
-                                        )}>
-                                            {item.name}
-                                        </span>
-                                    </button>
-                                ))}
-                            </nav>
-                        </div>
+                                    <div className="flex flex-col space-y-1.5 items-center">
+                                        <p className="text-base font-semibold">{fullName}</p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {userRole === 'resident' ? 'Resident' : 'Household Member'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </SheetHeader>
 
-                        {/* Footer Section */}
-                        <div className="border-t pt-6">
-                            <Button
-                                variant="ghost"
-                                className="w-full justify-start gap-x-3 text-sm hover:translate-x-1 transition-transform duration-200"
-                                onClick={() => setShowLogoutConfirmation(true)}
-                            >
-                                <LogOut className="h-5 w-5" />
-                                Sign out
-                            </Button>
+                            {/* Navigation Items */}
+                            <div className="flex-1 py-6 space-y-4">
+                                <nav className="space-y-2">
+                                    {navigation.map((item) => (
+                                        <button
+                                            key={item.name}
+                                            onClick={() => handleNavigation(item.href, item.name)}
+                                            className={cn(
+                                                "flex w-full items-center gap-x-3 px-4 py-3 text-sm rounded-lg",
+                                                "transition-all duration-200 ease-in-out",
+                                                "hover:bg-accent/80 hover:translate-x-1",
+                                                pathname === item.href && "bg-accent",
+                                                activeItem === item.name && "bg-accent/90 translate-x-2",
+                                            )}
+                                        >
+                                            <div className="relative">
+                                                <item.icon className={cn(
+                                                    "h-5 w-5 transition-transform duration-200",
+                                                    activeItem === item.name && "scale-110"
+                                                )} />
+                                                {item.name === 'Messages' && unreadCount > 0 && (
+                                                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#832131] text-[10px] text-white">
+                                                        {unreadCount}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span className={cn(
+                                                "transition-colors duration-200",
+                                                activeItem === item.name && "font-medium"
+                                            )}>
+                                                {item.name}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </nav>
+                            </div>
+
+                            {/* Footer Section */}
+                            <div className="border-t pt-6">
+                                <Button
+                                    variant="ghost"
+                                    className="w-full justify-start gap-x-3 text-sm hover:translate-x-1 transition-transform duration-200"
+                                    onClick={() => setShowLogoutConfirmation(true)}
+                                >
+                                    <LogOut className="h-5 w-5" />
+                                    Sign out
+                                </Button>
+                            </div>
                         </div>
-                    </div>
-                </SheetContent>
-            </Sheet>
+                    </SheetContent>
+                </Sheet>
+            </div>
 
             {/* Logout Confirmation Dialog */}
             <Dialog open={showLogoutConfirmation} onOpenChange={setShowLogoutConfirmation}>

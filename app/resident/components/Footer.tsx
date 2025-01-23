@@ -2,9 +2,13 @@ import React from "react"
 import Link from "next/link"
 import { Mail, Phone, MapPin, ExternalLink, Facebook, Twitter, Instagram, Globe } from "lucide-react"
 
-export function Footer() {
+interface FooterProps {
+  className?: string;
+}
+
+export function Footer({ className }: FooterProps) {
   return (
-    <footer className="bg-[#8B0000]">
+    <footer className={`bg-[#8B0000] ${className || ''}`}>
       <div className="container mx-auto">
         {/* Main Footer Content */}
         <div className="px-4 md:px-6 py-8 md:py-16">
@@ -12,7 +16,7 @@ export function Footer() {
             {/* Brand Section */}
             <div className="md:col-span-4 space-y-4 md:space-y-6">
               <div className="text-center md:text-left">
-                <h3 className="text-xl md:text-2xl font-bold text-white">LKJ Estate</h3>
+                <h3 className="text-xl md:text-2xl font-bold text-white">LKJ Gardens</h3>
                 <p className="text-sm text-gray-300 mt-2 leading-relaxed max-w-sm mx-auto md:mx-0">
                   Experience modern living with smart security solutions. Building a connected and secure community together.
                 </p>
