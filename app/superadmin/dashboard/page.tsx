@@ -452,7 +452,7 @@ export default function SuperAdminDashboard() {
           color="bg-blue-100"
         />
         <StatCard
-          title="Total Properties"
+          title="Total Flats"
           value={stats.totalProperties}
           icon={Building2}
           color="bg-green-100"

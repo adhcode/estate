@@ -42,10 +42,11 @@ interface MaintenanceHistory {
 }
 
 interface MaintenanceSchedule {
+    id?: string
     facility: string
     frequency: string
     startDate: Date | undefined
-    nextDate: Date | undefined
+    nextDates: Date[]
 }
 
 export default function MaintenancePage() {
@@ -59,16 +60,18 @@ export default function MaintenancePage() {
     const [selectedDate, setSelectedDate] = useState<Date>()
     const [selectedFacility, setSelectedFacility] = useState<string>("")
     const [maintenancePeriod, setMaintenancePeriod] = useState<string>("")
-    const [schedule, setSchedule] = useState<MaintenanceSchedule>({
+    const [schedules, setSchedules] = useState<MaintenanceSchedule[]>([])
+    const [newSchedule, setNewSchedule] = useState<MaintenanceSchedule>({
         facility: "",
         frequency: "",
         startDate: undefined,
-        nextDate: undefined
+        nextDates: []
     })
     const supabase = createClientComponentClient()
 
     useEffect(() => {
         fetchMaintenanceData()
+        fetchSchedules()
     }, [])
 
     async function fetchMaintenanceData() {
@@ -105,6 +108,55 @@ export default function MaintenancePage() {
         } finally {
             setIsLoading(false)
         }
+    }
+
+    const fetchSchedules = async () => {
+        const { data, error } = await supabase
+            .from('maintenance_schedule')
+            .select('*')
+            .order('scheduled_date', { ascending: true })
+
+        if (error) {
+            toast.error("Failed to fetch schedules")
+            return
+        }
+
+        if (data) {
+            setSchedules(data.map(schedule => ({
+                id: schedule.id,
+                facility: schedule.facility,
+                frequency: schedule.frequency,
+                startDate: new Date(schedule.scheduled_date),
+                nextDates: calculateNextDates(new Date(schedule.scheduled_date), schedule.frequency)
+            })))
+        }
+    }
+
+    const calculateNextDates = (startDate: Date, frequency: string): Date[] => {
+        const dates: Date[] = []
+        let months = 0
+
+        switch (frequency) {
+            case 'monthly':
+                months = 1
+                break
+            case 'quarterly':
+                months = 3
+                break
+            case 'biannual':
+                months = 6
+                break
+            case 'annual':
+                months = 12
+                break
+        }
+
+        // Calculate next 4 maintenance dates
+        for (let i = 1; i <= 4; i++) {
+            dates.push(addMonths(startDate, months * i))
+        }
+
+        return dates
     }
 
     // Add helper function to check if maintenance is due
@@ -232,42 +284,26 @@ export default function MaintenancePage() {
         )
     }
 
-    // Calculate next maintenance date based on frequency
-    const calculateNextDate = (startDate: Date, frequency: string): Date => {
-        switch (frequency) {
-            case 'monthly':
-                return addMonths(startDate, 1)
-            case 'quarterly':
-                return addMonths(startDate, 3)
-            case 'biannual':
-                return addMonths(startDate, 6)
-            case 'annual':
-                return addMonths(startDate, 12)
-            default:
-                return startDate
-        }
-    }
-
     const handleDateSelect = (date: Date | undefined) => {
         if (date) {
-            setSchedule(prev => ({
+            setNewSchedule(prev => ({
                 ...prev,
                 startDate: date,
-                nextDate: prev.frequency ? calculateNextDate(date, prev.frequency) : undefined
+                nextDates: prev.frequency ? calculateNextDates(date, prev.frequency) : []
             }))
         }
     }
 
     const handleFrequencyChange = (value: string) => {
-        setSchedule(prev => ({
+        setNewSchedule(prev => ({
             ...prev,
             frequency: value,
-            nextDate: prev.startDate ? calculateNextDate(prev.startDate, value) : undefined
+            nextDates: prev.startDate ? calculateNextDates(prev.startDate, value) : []
         }))
     }
 
     const handleScheduleMaintenance = async () => {
-        if (!schedule.startDate || !schedule.facility || !schedule.frequency) {
+        if (!newSchedule.startDate || !newSchedule.facility || !newSchedule.frequency) {
             toast.error("Please fill in all fields")
             return
         }
@@ -276,21 +312,21 @@ export default function MaintenancePage() {
             const { error } = await supabase
                 .from('maintenance_schedule')
                 .insert({
-                    facility: schedule.facility,
-                    scheduled_date: schedule.startDate.toISOString(),
-                    frequency: schedule.frequency,
-                    next_date: schedule.nextDate?.toISOString(),
-                    status: 'scheduled'
+                    facility: newSchedule.facility,
+                    scheduled_date: newSchedule.startDate.toISOString(),
+                    frequency: newSchedule.frequency,
+                    next_dates: newSchedule.nextDates.map(date => date.toISOString())
                 })
 
             if (error) throw error
 
             toast.success("Maintenance schedule created successfully")
-            setSchedule({
+            fetchSchedules()
+            setNewSchedule({
                 facility: "",
                 frequency: "",
                 startDate: undefined,
-                nextDate: undefined
+                nextDates: []
             })
         } catch (error) {
             console.error('Error scheduling maintenance:', error)
@@ -304,7 +340,7 @@ export default function MaintenancePage() {
 
     return (
         <div className="container mx-auto p-6">
-            <h1 className="text-2xl font-bold mb-6">Maintenance Schedule</h1>
+            <h1 className="text-2xl font-bold mb-6">Facility Maintenance Schedule</h1>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
@@ -316,8 +352,8 @@ export default function MaintenancePage() {
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Facility</label>
                             <Select
-                                value={schedule.facility}
-                                onValueChange={(value) => setSchedule(prev => ({ ...prev, facility: value }))}
+                                value={newSchedule.facility}
+                                onValueChange={(value) => setNewSchedule(prev => ({ ...prev, facility: value }))}
                             >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select facility" />
@@ -332,7 +368,7 @@ export default function MaintenancePage() {
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Maintenance Frequency</label>
                             <Select
-                                value={schedule.frequency}
+                                value={newSchedule.frequency}
                                 onValueChange={handleFrequencyChange}
                             >
                                 <SelectTrigger>
@@ -340,9 +376,9 @@ export default function MaintenancePage() {
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="monthly">Monthly</SelectItem>
-                                    <SelectItem value="quarterly">Quarterly (Every 3 months)</SelectItem>
-                                    <SelectItem value="biannual">Bi-annual (Every 6 months)</SelectItem>
-                                    <SelectItem value="annual">Annual</SelectItem>
+                                    <SelectItem value="quarterly">Every 3 Months</SelectItem>
+                                    <SelectItem value="biannual">Every 6 Months</SelectItem>
+                                    <SelectItem value="annual">Yearly</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -352,42 +388,27 @@ export default function MaintenancePage() {
                             <div className="border rounded-md p-4">
                                 <DayPicker
                                     mode="single"
-                                    selected={schedule.startDate}
+                                    selected={newSchedule.startDate}
                                     onSelect={handleDateSelect}
                                     disabled={(date) => date < new Date()}
                                     className="w-full"
-                                    classNames={{
-                                        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-                                        month: "space-y-4",
-                                        caption: "flex justify-center pt-1 relative items-center",
-                                        caption_label: "text-sm font-medium",
-                                        nav: "space-x-1 flex items-center",
-                                        nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                                        nav_button_previous: "absolute left-1",
-                                        nav_button_next: "absolute right-1",
-                                        table: "w-full border-collapse space-y-1",
-                                        head_row: "flex",
-                                        head_cell: "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
-                                        row: "flex w-full mt-2",
-                                        cell: "text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-                                        day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
-                                        day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
-                                        day_today: "bg-accent text-accent-foreground",
-                                        day_outside: "text-muted-foreground opacity-50",
-                                        day_disabled: "text-muted-foreground opacity-50",
-                                        day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
-                                        day_hidden: "invisible",
-                                    }}
                                 />
                             </div>
                         </div>
 
-                        {schedule.nextDate && (
-                            <div className="p-4 bg-gray-50 rounded-md">
-                                <p className="text-sm font-medium text-gray-600">Next Maintenance Date:</p>
-                                <p className="text-lg font-semibold text-gray-900">
-                                    {format(schedule.nextDate, 'PPP')}
-                                </p>
+                        {newSchedule.nextDates.length > 0 && (
+                            <div className="p-4 bg-gray-50 rounded-md space-y-3">
+                                <p className="text-sm font-medium text-gray-600">Next Maintenance Dates:</p>
+                                <div className="space-y-2">
+                                    {newSchedule.nextDates.map((date, index) => (
+                                        <div key={index} className="flex items-center space-x-2">
+                                            <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                                            <p className="text-sm text-gray-900">
+                                                {format(date, 'PPP')}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -402,36 +423,36 @@ export default function MaintenancePage() {
 
                 <Card>
                     <CardHeader>
-                        <CardTitle>Facility Maintenance</CardTitle>
+                        <CardTitle>Current Schedules</CardTitle>
+                        <CardDescription>Active maintenance schedules</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-xl font-semibold">Water Station</h2>
-                            <Button variant="outline" onClick={() => setSelectedRecord(waterStation)}>
-                                View Details
-                            </Button>
-                        </div>
-                        <p>Next maintenance: {formatDate(waterStation?.next_maintenance_date || null)}</p>
-                        {waterStation?.last_maintenance_date && (
-                            <p>Last maintained: {formatDate(waterStation.last_maintenance_date)}</p>
-                        )}
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Facility Maintenance</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-xl font-semibold">Injection Station</h2>
-                            <Button variant="outline" onClick={() => setSelectedRecord(injectionStation)}>
-                                View Details
-                            </Button>
-                        </div>
-                        <p>Next maintenance: {formatDate(injectionStation?.next_maintenance_date || null)}</p>
-                        {injectionStation?.last_maintenance_date && (
-                            <p>Last maintained: {formatDate(injectionStation.last_maintenance_date)}</p>
+                        {schedules.map((schedule) => (
+                            <div key={schedule.id} className="p-4 border rounded-lg space-y-3">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="font-medium">
+                                            {schedule.facility === 'water_station' ? 'Water Station' : 'Injection Station'}
+                                        </h3>
+                                        <p className="text-sm text-gray-500">
+                                            {schedule.frequency.charAt(0).toUpperCase() + schedule.frequency.slice(1)} maintenance
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <p className="text-sm font-medium text-gray-600">Next maintenance dates:</p>
+                                    {schedule.nextDates.map((date, index) => (
+                                        <p key={index} className="text-sm text-gray-900">
+                                            {format(date, 'PPP')}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                        {schedules.length === 0 && (
+                            <p className="text-sm text-gray-500 text-center py-4">
+                                No maintenance schedules set
+                            </p>
                         )}
                     </CardContent>
                 </Card>
